@@ -1,0 +1,46 @@
+tools:
+  - name: import_media
+    description: Import local video, image, or audio files into the media bin.
+    input_schema: {type: object, required: [paths], properties: {paths: {type: array, items: {type: string}}, folder: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/import_media.py
+  - name: list_media
+    description: List imported media with duration, dimensions, codec, and bin folder.
+    input_schema: {type: object, properties: {folder: {type: string}, media_type: {type: string, enum: [video, image, audio, all]}}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/list_media.py
+  - name: remove_media
+    description: Remove media items from the bin without deleting source files.
+    input_schema: {type: object, required: [media_ids], properties: {media_ids: {type: array, items: {type: string}}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/remove_media.py
+  - name: relink_media
+    description: Relink offline media to an explicit replacement path.
+    input_schema: {type: object, required: [media_id, path], properties: {media_id: {type: string}, path: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/relink_media.py
+  - name: generate_proxy
+    description: Generate CapCut proxies for selected video media.
+    input_schema: {type: object, required: [media_ids], properties: {media_ids: {type: array, items: {type: string}}, profile: {type: string, enum: [low, medium, high]}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/generate_proxy.py

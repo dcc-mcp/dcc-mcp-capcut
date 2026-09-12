@@ -1,0 +1,28 @@
+tools:
+  - name: apply_effect
+    description: Apply a named video effect or filter to a clip or track range.
+    input_schema: {type: object, required: [effect, target_id], properties: {effect: {type: string}, target_id: {type: string}, start: {type: number, minimum: 0}, duration: {type: number, minimum: 0}, parameters: {type: object}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/apply_effect.py
+  - name: remove_effect
+    description: Remove an effect instance from a clip.
+    input_schema: {type: object, required: [effect_id], properties: {effect_id: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/remove_effect.py
+  - name: color_adjust
+    description: Apply exposure, contrast, saturation, temperature, and tint corrections.
+    input_schema: {type: object, required: [target_id], properties: {target_id: {type: string}, exposure: {type: number}, contrast: {type: number}, saturation: {type: number}, temperature: {type: number}, tint: {type: number}, lut: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/color_adjust.py

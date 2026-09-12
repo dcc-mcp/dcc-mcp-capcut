@@ -1,0 +1,55 @@
+tools:
+  - name: inspect_project
+    description: Inspect the open CapCut project, active timeline, and media counts.
+    input_schema: {type: object, properties: {}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/inspect_project.py
+  - name: create_project
+    description: Create a new CapCut project with explicit canvas settings.
+    input_schema: {type: object, required: [name], properties: {name: {type: string}, width: {type: integer, minimum: 1}, height: {type: integer, minimum: 1}, fps: {type: number, exclusiveMinimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/create_project.py
+  - name: save_project
+    description: Save the current CapCut project and return the saved path.
+    input_schema: {type: object, properties: {path: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/save_project.py
+  - name: close_project
+    description: Close the current project after an explicit save decision.
+    input_schema: {type: object, properties: {save: {type: boolean, default: true}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/close_project.py
+  - name: get_project_settings
+    description: Return canvas, frame-rate, color, and export defaults.
+    input_schema: {type: object, properties: {}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/get_project_settings.py
+  - name: set_project_settings
+    description: Update project canvas and frame-rate settings.
+    input_schema: {type: object, properties: {width: {type: integer, minimum: 1}, height: {type: integer, minimum: 1}, fps: {type: number, exclusiveMinimum: 0}, aspect_ratio: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/set_project_settings.py

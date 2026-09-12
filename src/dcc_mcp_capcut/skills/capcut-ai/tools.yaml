@@ -1,0 +1,19 @@
+tools:
+  - name: remove_background
+    description: Run CapCut background removal on a selected clip.
+    input_schema: {type: object, required: [clip_id], properties: {clip_id: {type: string}, mode: {type: string, enum: [auto, chroma]}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: async
+    affinity: any
+    source_file: scripts/remove_background.py
+  - name: stabilize_clip
+    description: Stabilize a handheld clip with a selectable strength.
+    input_schema: {type: object, required: [clip_id], properties: {clip_id: {type: string}, strength: {type: string, enum: [recommended, minimum, maximum]}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: async
+    affinity: any
+    source_file: scripts/stabilize_clip.py

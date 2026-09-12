@@ -1,0 +1,56 @@
+tools:
+  - name: add_text
+    description: Add a text overlay with timing, style, and animation settings.
+    input_schema: {type: object, required: [text, start, duration], properties: {text: {type: string}, timeline_id: {type: string}, start: {type: number, minimum: 0}, duration: {type: number, exclusiveMinimum: 0}, style: {type: object}, animation_in: {type: string}, animation_out: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/add_text.py
+  - name: update_text
+    description: Update text content or style on an existing text item.
+    input_schema: {type: object, required: [text_id], properties: {text_id: {type: string}, text: {type: string}, style: {type: object}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/update_text.py
+  - name: remove_text
+    description: Remove a text overlay or caption track item.
+    input_schema: {type: object, required: [text_id], properties: {text_id: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/remove_text.py
+  - name: auto_captions
+    description: Generate captions from timeline audio with language and formatting options.
+    input_schema: {type: object, properties: {timeline_id: {type: string}, language: {type: string, default: zh-CN}, style: {type: object}, speaker_detection: {type: boolean, default: false}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 300
+    source_file: scripts/auto_captions.py
+  - name: import_subtitles
+    description: Import SRT, LRC, or ASS subtitles and apply them as an editable timeline text track.
+    input_schema:
+      type: object
+      required: [path]
+      properties:
+        path: {type: string, minLength: 1}
+        timeline_id: {type: string}
+        format: {type: string, enum: [srt, lrc, ass]}
+        offset: {type: number, default: 0}
+        language: {type: string, default: zh-CN}
+        style: {type: object}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/import_subtitles.py

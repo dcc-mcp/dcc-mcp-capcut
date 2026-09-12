@@ -1,0 +1,18 @@
+{
+  "project_name": "银河系：我们身处其中",
+  "aspect_ratio": "9:16",
+  "media": [
+    {"id": "earthrise", "path": "./assets/earthrise.mp4", "start": 0, "duration": 4.5, "track_type": "video"},
+    {"id": "oahu_flyover", "path": "./assets/oahu_flyover.mp4", "start": 4.2, "duration": 8.0, "track_type": "video"}
+  ],
+  "music": {"media_id": "free_music", "start": 0, "volume": 0.22, "fade_in": 0.8, "fade_out": 1.2},
+  "subtitle_file": "./galaxy_zh.srt",
+  "captions": [
+    {"text": "抬头看，银河系就在我们身边", "start": 0.6, "duration": 1.7, "style": {"font": "Microsoft YaHei", "size": 48, "weight": 700, "color": "#FFFFFF"}},
+    {"text": "这束光，可能已经走了数万年", "start": 2.4, "duration": 1.9, "style": {"font": "Microsoft YaHei", "size": 44, "weight": 600, "color": "#FFE08A"}},
+    {"text": "太阳位于银河系的猎户臂", "start": 5.0, "duration": 2.3, "style": {"font": "Microsoft YaHei", "size": 48, "weight": 700, "color": "#FFFFFF"}},
+    {"text": "银河系直径约 10 万光年", "start": 7.5, "duration": 2.5, "style": {"font": "Microsoft YaHei", "size": 48, "weight": 600, "color": "#FFE08A"}},
+    {"text": "我们不是旁观者，而是其中一颗星", "start": 10.2, "duration": 2.0, "style": {"font": "Microsoft YaHei", "size": 44, "weight": 600, "color": "#FFFFFF"}}
+  ],
+  "output_path": "./output/free-travel-vlog.mp4"
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "dcc-mcp-capcut",
+      "include-component-in-tag": false,
+      "release-as": "0.1.0",
+      "extra-files": [
+        "pyproject.toml",
+        "src/dcc_mcp_capcut/__version__.py",
+        "src/dcc_mcp_capcut/skills/capcut-ai/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-audio/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-effects/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-export/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-media/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-project/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-setup/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-text/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-timeline/SKILL.md"
+      ]
+    }
+  }
+}

@@ -1,0 +1,57 @@
+tools:
+  - name: detect_installation
+    description: Read-only detection of CapCut Desktop executable candidates and current bridge configuration.
+    input_schema: {type: object, properties: {}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/detect_installation.py
+  - name: installation_plan
+    description: Return an exact operator-confirmed install, environment, panel, and verification plan.
+    input_schema: {type: object, properties: {preferred_scope: {type: string, enum: [current_user, machine]}}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/installation_plan.py
+  - name: install_capcut
+    description: Request installation through the operator-owned ui_control system-operation grant; never shells out locally.
+    input_schema: {type: object, required: [grant_id], properties: {grant_id: {type: string}, scope: {type: string, enum: [current_user, machine]}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: async
+    affinity: any
+    timeout_hint_secs: 900
+    source_file: scripts/install_capcut.py
+  - name: auto_setup_capcut
+    description: Install CapCut with an operator grant when missing, bind the shared runtime, and verify readiness.
+    input_schema: {type: object, required: [grant_id], properties: {grant_id: {type: string}, scope: {type: string, enum: [current_user, machine]}, bridge_port: {type: integer, minimum: 1, maximum: 65535}, panel_path: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: async
+    affinity: any
+    timeout_hint_secs: 900
+    source_file: scripts/auto_setup.py
+  - name: configure_environment
+    description: Configure bridge URL/token and panel settings through the CapCut host integration.
+    input_schema: {type: object, required: [bridge_port], properties: {bridge_port: {type: integer, minimum: 1, maximum: 65535}, window_title: {type: string}, panel_path: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/configure_environment.py
+  - name: verify_installation
+    description: Verify executable presence, bridge configuration, and readiness evidence after setup.
+    input_schema: {type: object, properties: {check_bridge: {type: boolean, default: true}}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/verify_installation.py

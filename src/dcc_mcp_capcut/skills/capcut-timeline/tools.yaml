@@ -1,0 +1,73 @@
+tools:
+  - name: create_timeline
+    description: Create a timeline with explicit resolution and frame rate.
+    input_schema: {type: object, required: [name], properties: {name: {type: string}, width: {type: integer}, height: {type: integer}, fps: {type: number}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/create_timeline.py
+  - name: list_timelines
+    description: List project timelines and their duration/track counts.
+    input_schema: {type: object, properties: {}}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/list_timelines.py
+  - name: add_clip
+    description: Place a media item on a named track at a timeline position.
+    input_schema: {type: object, required: [media_id, track_type, start], properties: {media_id: {type: string}, timeline_id: {type: string}, track_type: {type: string, enum: [video, overlay, audio]}, start: {type: number, minimum: 0}, source_in: {type: number, minimum: 0}, source_out: {type: number, minimum: 0}, track_index: {type: integer, minimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/add_clip.py
+  - name: move_clip
+    description: Move a clip to a new track and timeline position.
+    input_schema: {type: object, required: [clip_id, start], properties: {clip_id: {type: string}, start: {type: number, minimum: 0}, track_index: {type: integer, minimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/move_clip.py
+  - name: trim_clip
+    description: Set source in/out points for an existing timeline clip.
+    input_schema: {type: object, required: [clip_id, source_in, source_out], properties: {clip_id: {type: string}, source_in: {type: number, minimum: 0}, source_out: {type: number, minimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/trim_clip.py
+  - name: split_clip
+    description: Split a timeline clip at an absolute timeline time.
+    input_schema: {type: object, required: [clip_id, time], properties: {clip_id: {type: string}, time: {type: number, minimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/split_clip.py
+  - name: delete_clip
+    description: Delete a clip from the timeline while preserving source media.
+    input_schema: {type: object, required: [clip_id], properties: {clip_id: {type: string}}}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    source_file: scripts/delete_clip.py
+  - name: add_transition
+    description: Add a named transition between adjacent clips.
+    input_schema: {type: object, required: [left_clip_id, right_clip_id, transition], properties: {left_clip_id: {type: string}, right_clip_id: {type: string}, transition: {type: string}, duration: {type: number, minimum: 0}}}
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/add_transition.py

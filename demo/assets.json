@@ -1,0 +1,30 @@
+{
+  "license_note": "NASA/JPL visual media is provided as public-domain government work; retain source/credit metadata and verify any third-party marks before publishing. Audio is generated locally by render_vlog.py.",
+  "assets": [
+    {
+      "id": "earthrise",
+      "kind": "video",
+      "source": "https://svs.gsfc.nasa.gov/4593/",
+      "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a004100/a004129/fromearth2_360p30.mp4",
+      "download_hint": "fromearth2_360p30.mp4 (153 KB)",
+      "license": "NASA public domain",
+      "role": "opening establishing shot"
+    },
+    {
+      "id": "oahu_flyover",
+      "kind": "video",
+      "source": "https://photojournal.jpl.nasa.gov/animation/PIA14898",
+      "download_url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia14/pia14898/PIA14898_ASTER_Oahu_320.mp4",
+      "download_hint": "PIA14898_ASTER_Oahu_320.mp4",
+      "license": "NASA/JPL public domain",
+      "role": "travel montage"
+    },
+    {
+      "id": "free_music",
+      "kind": "audio",
+      "source": "demo/render_vlog.py",
+      "license": "Original audio generated locally with FFmpeg sine sources",
+      "role": "background music"
+    }
+  ]
+}

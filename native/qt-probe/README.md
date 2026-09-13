@@ -1,11 +1,22 @@
 # Optional native Qt metadata probe
 
-This experimental C++ plugin implements a real Qt host consumer for
+This experimental C++ probe implements a real Qt host consumer for
 `host.describe` and `qt.inspect`. It is independent of the existing panel broker.
 It does **not** implement CapCut editing, TTS, export, arbitrary invocation, input
 injection, or property value reads. Object IDs are snapshot-local indices.
 
 ## Loading and portability
+
+Two loaders share the same probe: a generic Qt plugin and `qttestability`, which
+exports Qt's `qt_testability_init` startup hook. The latter avoids the generic
+plugin meta-object dependency stripped from the tested CapCut Qt6Gui build.
+For testability, make the staged `lib/qttestability` library discoverable to that
+host and launch with `-testability --dcc-capcut-probe-config <absolute-json-path>`.
+The configuration has `token`, `exe_sha256`, and `endpoint` string fields, with
+the same meanings as the environment variables below. Keep this file private.
+Never replace an existing testability library. A vendor executable directory is
+one Windows search location; deployment there must be explicit and reversible.
+Loading the probe requires a new host process and does not attach to a running one.
 
 Qt's documented generic plugin loader accepts `QT_QPA_GENERIC_PLUGINS` and
 `QT_PLUGIN_PATH`. See [Qt 6.2.2 application initialization](https://github.com/qt/qtbase/blob/v6.2.2/src/gui/kernel/qguiapplication.cpp)
@@ -63,3 +74,13 @@ Keep native binaries in an optional versioned adapter bundle, outside the shared
 Python runtime. Before publishing such a bundle, record its SHA-256, architecture,
 compiler ABI, Qt version, probe protocol and exact host-build acceptance evidence.
 This change supplies source and build tests, not a production native release.
+
+## Windows CapCut acceptance
+
+CapCut 9.4.0.4015 / Qt 6.2.2 loaded the testability library through a DCC-CUA
+structured launch request. A bound live request returned 1,094 objects from the
+home window, including application ViewModels, with no tree truncation.
+The generic loader is not compatible with this vendor Qt6Gui: it lacks the
+`QGenericPlugin::staticMetaObject` import required by the standard plugin.
+This is metadata acceptance only; project state, editing, TTS and export are not
+validated by that result. macOS and Linux have fixture coverage only.

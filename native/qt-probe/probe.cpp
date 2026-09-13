@@ -2,7 +2,9 @@
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QFile>
+#ifdef DCC_GENERIC_PLUGIN
 #include <QGenericPlugin>
+#endif
 #include <QGuiApplication>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -23,19 +25,34 @@ namespace {
 constexpr int MaxRequest = 8192;
 QJsonObject failure(const QString &code) { return {{"ok", false}, {"error", code}}; }
 
+QJsonObject configuration() {
+    const auto args = QCoreApplication::arguments();
+    const int index = args.indexOf("--dcc-capcut-probe-config");
+    if (index >= 0) {
+        if (index + 1 >= args.size()) return {};
+        QFile file(args.at(index + 1));
+        if (!file.open(QIODevice::ReadOnly) || file.size() > 4096) return {};
+        return QJsonDocument::fromJson(file.readAll()).object();
+    }
+    return {{"token", qEnvironmentVariable("DCC_CAPCUT_PROBE_TOKEN")},
+        {"exe_sha256", qEnvironmentVariable("DCC_CAPCUT_PROBE_EXE_SHA256")},
+        {"endpoint", qEnvironmentVariable("DCC_CAPCUT_PROBE_ENDPOINT")}};
+}
+
 class Probe : public QObject {
     QTcpServer server;
     QByteArray token;
     QString fingerprint;
 public:
     explicit Probe(QObject *parent = nullptr) : QObject(parent) {
-        token = qgetenv("DCC_CAPCUT_PROBE_TOKEN");
+        const auto config = configuration();
+        token = config.value("token").toString().toUtf8();
         QFile binary(QCoreApplication::applicationFilePath());
         if (token.size() < 32 || !binary.open(QIODevice::ReadOnly)) return;
         QCryptographicHash hash(QCryptographicHash::Sha256);
         if (!hash.addData(&binary)) return;
         fingerprint = QString::fromLatin1(hash.result().toHex());
-        if (fingerprint != qEnvironmentVariable("DCC_CAPCUT_PROBE_EXE_SHA256")
+        if (fingerprint != config.value("exe_sha256").toString()
             || QByteArray(qVersion()) != QByteArray(QT_VERSION_STR)) return;
         if (!server.listen(QHostAddress::LocalHost, 0)) return;
         connect(&server, &QTcpServer::newConnection, this, [this] {
@@ -63,7 +80,7 @@ public:
                 });
             }
         });
-        const auto path = qEnvironmentVariable("DCC_CAPCUT_PROBE_ENDPOINT");
+        const auto path = config.value("endpoint").toString();
         if (path.isEmpty()) { server.close(); return; }
         QSaveFile file(path);
         if (!file.open(QIODevice::WriteOnly)) { server.close(); return; }
@@ -131,6 +148,7 @@ public:
 };
 }
 
+#ifdef DCC_GENERIC_PLUGIN
 class ProbePlugin : public QGenericPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QGenericPluginFactoryInterface" FILE "probe.json")
@@ -143,3 +161,10 @@ public:
     }
 };
 #include "probe.moc"
+#else
+extern "C" Q_DECL_EXPORT void qt_testability_init() {
+    auto app = QCoreApplication::instance();
+    if (!app) return;
+    QTimer::singleShot(0, app, [app] { new Probe(app); });
+}
+#endif

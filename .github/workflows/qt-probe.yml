@@ -54,4 +54,6 @@ jobs:
         shell: bash
         run: |
           export PATH="$PWD/qt/6.2.2/${{ matrix.qt_dir }}/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/qt/6.2.2/${{ matrix.qt_dir }}/lib:${LD_LIBRARY_PATH:-}"
           python tools/test_qt_probe_native.py "build/qt-probe/${{ matrix.fixture }}" build/qt-probe/stage
+          python tools/test_qt_probe_native.py "build/qt-probe/${{ matrix.fixture }}" build/qt-probe/stage testability

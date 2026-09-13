@@ -47,7 +47,7 @@ def _relative_media(value: Any) -> str:
         or parts.fragment
         or value.startswith("/")
         or "\\" in value
-        or any(p in ("", ".", "..") for p in value.split("/"))
+        or any(p in ("", ".", "..") or any(c in '<>:"|?*' for c in p) for p in value.split("/"))
         or "%" in value
         or any(ord(c) < 32 for c in value)
     ):

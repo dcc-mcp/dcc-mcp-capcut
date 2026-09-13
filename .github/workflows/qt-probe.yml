@@ -17,16 +17,19 @@ jobs:
             arch: win64_msvc2019_64
             qt_dir: msvc2019_64
             fixture: Release/probe_fixture.exe
+            archives: qtbase
           - os: ubuntu-22.04
             host: linux
             arch: gcc_64
             qt_dir: gcc_64
             fixture: probe_fixture
+            archives: qtbase icu
           - os: macos-15-intel
             host: mac
             arch: clang_64
             qt_dir: macos
             fixture: probe_fixture
+            archives: qtbase
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -37,7 +40,7 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install aqtinstall==3.3.0 -e .
       - name: Fetch matching Qt SDK
-        run: python -m aqt install-qt ${{ matrix.host }} desktop 6.2.2 ${{ matrix.arch }} -O qt --archives qtbase
+        run: python -m aqt install-qt ${{ matrix.host }} desktop 6.2.2 ${{ matrix.arch }} -O qt --archives ${{ matrix.archives }}
       - name: Install Linux GUI link dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1-mesa-dev

@@ -26,13 +26,23 @@ class CapCutWindowBinding:
     title: str = "CapCut"
 
 
-def select_capcut_window(windows: list[dict[str, Any]]) -> CapCutWindowBinding:
+def select_capcut_window(
+    windows: list[dict[str, Any]], *, pid: int | None = None, window_handle: int | None = None
+) -> CapCutWindowBinding:
     """Select exactly one visible, non-minimized CapCut main window."""
+    if (pid is None) != (window_handle is None):
+        raise CapCutBindingError("pid and window_handle must be supplied together")
+    if pid is not None and (pid <= 0 or window_handle is None or window_handle <= 0):
+        raise CapCutBindingError("pid and window_handle must be positive")
     candidates = [
         window
         for window in windows
         if str(window.get("app_name", "")).casefold() == "capcut.exe"
-        and str(window.get("title", "")).casefold() == "capcut"
+        and (
+            str(window.get("title", "")).casefold() == "capcut"
+            if pid is None
+            else window.get("pid") == pid and window.get("window_id") == window_handle
+        )
         and window.get("is_on_screen") is True
         and window.get("minimized") is False
         and int(window.get("pid", 0)) > 0
@@ -52,7 +62,9 @@ def select_capcut_window(windows: list[dict[str, Any]]) -> CapCutWindowBinding:
     )
 
 
-def discover_capcut_window() -> CapCutWindowBinding:
+def discover_capcut_window(
+    *, pid: int | None = None, window_handle: int | None = None
+) -> CapCutWindowBinding:
     """Read the official dcc-cua inventory without performing UI input."""
     try:
         completed = subprocess.run(
@@ -60,6 +72,7 @@ def discover_capcut_window() -> CapCutWindowBinding:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=15,
         )
     except (FileNotFoundError, subprocess.SubprocessError) as exc:
@@ -70,7 +83,7 @@ def discover_capcut_window() -> CapCutWindowBinding:
         raise CapCutBindingError("dcc-cua returned invalid window inventory JSON") from exc
     if not isinstance(windows, list):
         raise CapCutBindingError("dcc-cua window inventory must be a list")
-    return select_capcut_window(windows)
+    return select_capcut_window(windows, pid=pid, window_handle=window_handle)
 
 
 def process_is_alive(pid: int) -> bool:
@@ -99,11 +112,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(list(argv) if argv is not None else None)
     if (args.pid is None) != (args.window_handle is None):
         parser.error("--pid and --window-handle must be supplied together")
-    binding = (
-        CapCutWindowBinding(args.pid, args.window_handle)
-        if args.pid is not None
-        else discover_capcut_window()
-    )
+    binding = discover_capcut_window(pid=args.pid, window_handle=args.window_handle)
     os.environ.setdefault("DCC_MCP_CAPCUT_BRIDGE_TOKEN", secrets.token_urlsafe(32))
     stopped = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stopped.set())

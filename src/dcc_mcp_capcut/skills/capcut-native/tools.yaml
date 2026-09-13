@@ -1,0 +1,24 @@
+tools:
+  - name: describe_qt_host
+    description: Return the bound Qt probe identity and read-only capabilities.
+    input_schema: {type: object, properties: {}, additionalProperties: false}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/describe_qt_host.py
+  - name: inspect_qt_objects
+    description: Read bounded Qt object and method metadata, without property values or invocation.
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        max_nodes: {type: integer, minimum: 1, maximum: 5000, default: 500}
+        max_depth: {type: integer, minimum: 0, maximum: 20, default: 8}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/inspect_qt_objects.py

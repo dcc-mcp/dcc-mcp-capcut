@@ -50,8 +50,12 @@ def test_select_capcut_window_fails_closed_on_ambiguity():
 def test_explicit_binding_preserves_localized_dialog_title():
     windows = [
         {
-            "app_name": "CapCut.exe", "pid": 42, "window_id": handle,
-            "title": title, "is_on_screen": True, "minimized": False,
+            "app_name": "CapCut.exe",
+            "pid": 42,
+            "window_id": handle,
+            "title": title,
+            "is_on_screen": True,
+            "minimized": False,
             "bounds": {"width": 800, "height": 600},
         }
         for handle, title in [(99, "CapCut"), (100, "推荐功能")]

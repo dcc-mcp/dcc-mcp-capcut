@@ -1,0 +1,57 @@
+tools:
+  - name: export_otio
+    description: Export supplied frame-based edit decisions to OTIO JSON without reading or changing CapCut. Requires interchange extra. Effects must be baked; captions become markers.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [timeline]
+      properties:
+        timeline:
+          type: object
+          additionalProperties: false
+          required: [name, fps, width, height, duration_frames, tracks]
+          properties:
+            name: {type: string, minLength: 1}
+            fps: {type: number, exclusiveMinimum: 0}
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+            duration_frames: {type: integer, minimum: 1}
+            tracks:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [name, kind, clips]
+                properties:
+                  name: {type: string, minLength: 1}
+                  kind: {type: string, enum: [Video, Audio]}
+                  clips:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [name, media, start, duration, media_duration]
+                      properties:
+                        name: {type: string, minLength: 1}
+                        media: {type: string, minLength: 1}
+                        start: {type: integer, minimum: 0}
+                        source_in: {type: integer, minimum: 0}
+                        duration: {type: integer, minimum: 1}
+                        media_duration: {type: integer, minimum: 1}
+            captions:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [text, start, duration]
+                properties:
+                  text: {type: string, minLength: 1}
+                  start: {type: integer, minimum: 0}
+                  duration: {type: integer, minimum: 1}
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/export_otio.py

@@ -20,7 +20,8 @@ Repository = "https://github.com/dcc-mcp/dcc-mcp-capcut"
 Issues = "https://github.com/dcc-mcp/dcc-mcp-capcut/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8", "build>=1.2", "pyyaml>=6"]
+dev = ["pytest>=8", "ruff>=0.8", "build>=1.2", "pyyaml>=6", "opentimelineio>=0.16,<1"]
+interchange = ["opentimelineio>=0.16,<1"]
 
 [project.entry-points."dcc_mcp.adapters"]
 capcut = "dcc_mcp_capcut:CapCutMcpServer"

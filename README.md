@@ -42,6 +42,32 @@ an offline 9:16 proof in `demo/output/free-travel-vlog.mp4`. When CapCut is
 available, call `auto_setup_capcut`, import the same assets, and replay
 `demo/vlog_recipe.json` through `build_vlog_demo` for a native project export.
 
+## Portable OpenTimelineIO export
+
+Install `dcc-mcp-capcut[interchange]` to enable the `capcut-interchange`
+skill's `export_otio` tool, or use the host-independent CLI:
+
+```powershell
+python -m dcc_mcp_capcut.interchange --input edit.json --output timeline.otio
+```
+
+The input is an explicit frame-based edit decision list, with `name`, `fps`,
+`width`, `height`, `duration_frames`, and `tracks`. Each track has `name`,
+`kind` (`Video` or `Audio`), and ordered `clips`. Each clip specifies `name`,
+relative `media` path, timeline `start`, optional `source_in` (default 0),
+`duration`, and `media_duration`; all time values are integer frames at `fps`.
+Optional `captions` contain `text`, `start`, and `duration` and become markers.
+See [the interchange contract](docs/interchange.md) for a complete example.
+
+The exporter preserves gaps, source trims, separate tracks and fractional
+frame rates. It rejects overlaps, out-of-range edits, absolute/traversing media
+paths and unknown fields. The CLI refuses to overwrite an existing file.
+
+This is export from supplied edit decisions, not a readback of a live CapCut
+project. Bake unsupported effects into media and include SRT for editable
+subtitles. Ship all referenced media with the OTIO file, and resolve relative
+paths from its directory. Other applications may require an OTIO importer.
+
 ## Runtime boundary
 
 The adapter is an external-bridge (`instance_type=gui`) service. It does not

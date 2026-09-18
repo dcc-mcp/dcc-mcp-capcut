@@ -39,6 +39,7 @@ jobs:
       - name: Test
         run: python -m pytest -q
       - name: Doctor preflight smoke
+        shell: bash
         run: |
           set +e
           python -m dcc_mcp_capcut.doctor --json > doctor-report.json

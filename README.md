@@ -68,6 +68,29 @@ project. Bake unsupported effects into media and include SRT for editable
 subtitles. Ship all referenced media with the OTIO file, and resolve relative
 paths from its directory. Other applications may require an OTIO importer.
 
+## Preflight diagnostics
+
+`dcc-mcp-capcut-doctor` is a read-only preflight entry point. It collects the
+evidence the adapter needs before it binds a window, so a failed start reports
+one diagnosable cause plus a remediation instead of a traceback:
+
+```powershell
+dcc-mcp-capcut-doctor             # human-readable summary
+dcc-mcp-capcut-doctor --fix-hints # add remediation steps
+dcc-mcp-capcut-doctor --json      # machine-readable report
+```
+
+It checks the Python version, `dcc_mcp_core` against the CI-verified floor, the
+runtime bundle handshake, the CapCut executable, `dcc-cua` availability and
+window uniqueness, the bridge port and token, the bundled panel payload, the
+optional Qt probe configuration, and `opentimelineio`.
+
+Every check is `ok`, `warn` (the adapter still starts, but degraded or with an
+optional feature disabled), `fail` (the adapter cannot start in this state), or
+`skip` (not applicable to this platform). The exit code is `0` when nothing
+failed and `1` when at least one check failed. The doctor never installs,
+writes, or mutates anything.
+
 ## Runtime boundary
 
 The adapter is an external-bridge (`instance_type=gui`) service. It does not

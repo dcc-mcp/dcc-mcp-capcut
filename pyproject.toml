@@ -29,6 +29,7 @@ capcut = "dcc_mcp_capcut:CapCutMcpServer"
 [project.scripts]
 dcc-mcp-capcut = "dcc_mcp_capcut.bootstrap:main"
 dcc-mcp-capcut-runtime = "dcc_mcp_capcut.runtime_entry:main"
+dcc-mcp-capcut-doctor = "dcc_mcp_capcut.doctor:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dcc_mcp_capcut"]

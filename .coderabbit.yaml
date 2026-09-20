@@ -1,0 +1,24 @@
+# CodeRabbit configuration for dcc-mcp-capcut.
+#
+# PR descriptions here are human-authored public release notes.
+# `reviews.high_level_summary` is the release-notes generator: with it enabled
+# CodeRabbit rewrites the PR description and wraps it in a
+# `<!-- release notes by coderabbit.ai -->` block, so cleaning the body once is
+# never stable -- the next review re-injects it. Keeping it off means a bot
+# never rewrites the public summary after a human has written it.
+#
+# Schema notes, so this file is not "fixed" back into a no-op later:
+#   * There is no `release_notes` key. The description injection is
+#     `reviews.high_level_summary`; `high_level_summary_instructions` documents
+#     it as "By default, CodeRabbit generates release notes in the description".
+#   * There is no `walkthrough` boolean either. The walkthrough is a separate
+#     review *comment*, not part of the description, and it carries the
+#     reviewer's findings, so it stays enabled.
+#   * Caveat: with `high_level_summary` false, CodeRabbit still generates a
+#     summary if the `@coderabbitai summary` placeholder is present in the
+#     description. Do not add that placeholder.
+reviews:
+  high_level_summary: false
+  # Keep the generated summary out of the walkthrough comment as well.
+  high_level_summary_in_walkthrough: false
+  poem: false

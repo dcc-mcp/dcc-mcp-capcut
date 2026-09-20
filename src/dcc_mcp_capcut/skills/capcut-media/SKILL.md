@@ -32,7 +32,7 @@ If any of these is unproven, run `capcut-setup` first.
 | `list_media` | no | yes | Filter by `folder` and `media_type` (`video`, `image`, `audio`, `all`). |
 | `remove_media` | yes | no | Removes from the bin only; source files are never deleted. |
 | `relink_media` | yes | yes | Point an offline item at an explicit replacement path. |
-| `generate_proxy` | yes | yes | `profile` is `low`, `medium`, or `high`; returns `job_id` and `proxy_id`. |
+| `generate_proxy` | yes | yes | `profile` is `low`, `medium`, or `high`; returns `job_id` or `proxy_id`. |
 
 ### Mapping imported paths to `media_id`
 
@@ -67,7 +67,8 @@ submitted path got an ID. So the submit response alone is not a path to ID map:
   dimensions, and codec.
 - `import_media` returned a non-empty `media_id`, and `list_media` shows one
   item per submitted path so every `add_clip` gets a confirmed ID.
-- `generate_proxy` returned both `job_id` and `proxy_id`.
+- `generate_proxy` returned a non-empty `job_id` or `proxy_id` — the adapter
+  accepts either one alone; requiring both would wrongly fail a legal result.
 - `relink_media` is confirmed by `list_media` no longer reporting the item as
   offline.
 - `remove_media` removed only the bin entries; verify the source files still

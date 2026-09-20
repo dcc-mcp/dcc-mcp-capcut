@@ -32,7 +32,7 @@ If any of these is unproven, run `capcut-setup` first.
 | `add_text` | yes | no | `text`, `start`, `duration`, plus optional style and animations; returns `text_id`. |
 | `update_text` | yes | yes | Change content or style on an existing `text_id`; safe to re-apply. |
 | `remove_text` | yes | no | Removes an overlay or caption track item. |
-| `auto_captions` | yes | no | `language` defaults to `zh-CN`; returns `caption_ids` and `job_id`. |
+| `auto_captions` | yes | no | `language` defaults to `zh-CN`; returns `caption_ids` or `job_id`. |
 | `import_subtitles` | yes | no | SRT/LRC/ASS plus `offset` and `language`; returns `caption_ids`. |
 
 ## Failure recovery

@@ -22,7 +22,9 @@ as a general "AI" surface.
   `capcut-timeline`'s readback.
 - Host-side support for the operation. These are optional features; a host that
   does not support them must reject with a structured error.
-- Patience: both tools are asynchronous host jobs that return a `job_id`.
+- Patience: both tools are asynchronous host jobs. The result is accepted on
+  `job_id` **or** `clip_id`, so a host may lawfully return only the `clip_id`
+  you already supplied and no job handle.
 
 If any of these is unproven, run `capcut-setup` first.
 
@@ -30,8 +32,8 @@ If any of these is unproven, run `capcut-setup` first.
 
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
-| `remove_background` | yes | yes | `clip_id` plus `mode` (`auto`, `chroma`); returns `job_id` and `clip_id`. |
-| `stabilize_clip` | yes | yes | `clip_id` plus `strength` (`recommended`, `minimum`, `maximum`); returns `job_id` and `clip_id`. |
+| `remove_background` | yes | yes | `clip_id` plus `mode` (`auto`, `chroma`); returns `job_id` or `clip_id`. |
+| `stabilize_clip` | yes | yes | `clip_id` plus `strength` (`recommended`, `minimum`, `maximum`); returns `job_id` or `clip_id`. |
 
 ## Failure recovery
 
@@ -46,8 +48,9 @@ If any of these is unproven, run `capcut-setup` first.
 
 ## Acceptance
 
-- The call returned both `job_id` and `clip_id` together with
-  `verification: {ok: true, ...}`.
+- The call returned a non-empty `job_id` or `clip_id` together with
+  `verification: {ok: true, ...}` — the adapter accepts either one alone;
+  requiring both would wrongly fail a legal result.
 - The result is confirmed by re-reading the clip and its effect list in the
   timeline readback — **this catalog has no dedicated AI job-status tool**, so
   readback is the only confirmation available.

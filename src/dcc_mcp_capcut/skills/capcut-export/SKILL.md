@@ -31,15 +31,17 @@ If any of these is unproven, run `capcut-setup` first.
 
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
-| `export_video` | yes | yes | Async. `output_path` plus optional `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`. Returns `job_id` or `output_path`; poll `get_export_status` with the `job_id`. |
+| `export_video` | yes | yes | Async. `output_path` plus optional `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`. Returns `job_id` or `output_path`; only a returned `job_id` makes `get_export_status` and `cancel_export` usable. |
 | `get_export_status` | no | yes | Progress and terminal state for a `job_id`, plus output validation. Completeness is only proved by a reported success **and** an on-disk file. |
-| `cancel_export` | yes | yes | `job_id` of a running job. Idempotent: cancelling twice is safe. Needs `verification.ok: true`; returns no stable ID, so confirm the terminal state with `get_export_status`. |
+| `cancel_export` | yes | yes | `job_id` of a running job — only usable when the submit call returned one. Idempotent: cancelling twice is safe. Needs `verification.ok: true`; returns no stable ID, so confirm the terminal state with `get_export_status`. |
 | `export_thumbnail` | yes | yes | Still frame at `time`; returns `job_id` or `output_path`. |
-| `build_vlog_demo` | yes | no | Async. `media` (list) plus optional `project_name`, `music`, `captions`, `output_path`, `aspect_ratio`. Not idempotent. |
+| `build_vlog_demo` | yes | no | Async. `media` (list) plus optional `project_name`, `music`, `captions`, `output_path`, `aspect_ratio`. Not idempotent. Has no required result ID, so pass an explicit `output_path`: a `job_id` is not guaranteed. |
 
 `export_video` and `build_vlog_demo` only acknowledge a job on return: the
 `output_path` they carry back is the requested destination, not proof that a file
-exists. See the submit/completion contract in
+exists. A submit result that carries no `job_id` cannot be polled or cancelled at
+all — the destination file plus an independent `ffprobe` is the only completion
+evidence left. See the submit/completion contract in
 `references/export-and-verification.md`.
 
 ## Failure recovery
@@ -53,11 +55,13 @@ exists. See the submit/completion contract in
 | Export reported success but the file is missing or truncated | The host wrote elsewhere, or the render did not finish. | Trust `get_export_status` plus an on-disk check, and probe with `ffprobe`. Never trust the success flag alone. |
 | Wrong dimensions or aspect ratio | Canvas, export size, and `aspect_ratio` disagree. | Re-check `get_project_settings` and the export arguments, then re-export. |
 | `build_vlog_demo` produced an empty timeline | Supplied media paths did not resolve on the host. | Import the media first (`capcut-media`) and pass the resulting identifiers. |
+| Submit returned no `job_id` | The host reported only `output_path`, or nothing. There is nothing to poll and nothing to cancel. | Wait for the file to appear at `output_path` and probe it with `ffprobe`. Re-submit with an explicit `output_path` next time. |
 
 ## Acceptance
 
-- `get_export_status` reports success **and** `output_path` points at a file that
-  exists on disk, with a non-trivial size.
+- `output_path` points at a file that exists on disk, with a non-trivial size,
+  and — when the submit result carried a `job_id` — `get_export_status` also
+  reports success. With no `job_id`, the file plus `ffprobe` is the whole proof.
 - The artifact is probed independently with `ffprobe` (duration, streams,
   dimensions). ffprobe is an external dependency and is not bundled.
 - Duration and dimensions match the project settings and the export arguments.

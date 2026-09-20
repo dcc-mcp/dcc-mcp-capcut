@@ -7,3 +7,78 @@ allowed-tools: Python
 metadata:
   dcc-mcp: {dcc: capcut, version: "0.1.0", layer: infrastructure, stage: setup, tags: "capcut, install, setup, readiness", tools: tools.yaml}
 ---
+
+Run this skill **first**, before any other `capcut-*` skill. Everything else in
+this catalog assumes an installed CapCut, a reachable bridge, and an exactly
+bound window; this skill is what establishes and proves that state.
+
+## When to use
+
+- The adapter has just been installed, or moved to a new machine.
+- Any other skill fails with a bridge, panel, or window-binding error.
+- You need evidence that setup actually completed, rather than an assumption.
+
+## Prerequisites
+
+- Windows host that owns the CapCut Desktop window. Detection and binding are
+  Windows-only; the doctor reports `skip` elsewhere.
+- `dcc-cua` on `PATH` for the read-only window inventory.
+- No grant is needed for `detect_installation`, `installation_plan`, or
+  `verify_installation`. `install_capcut`, `auto_setup_capcut`, and
+  `configure_environment` are consent-gated and require an operator-owned
+  `ui_control__system_operation` grant and its `grant_id`.
+
+## Tools
+
+| Tool | Side effects | Notes |
+| --- | --- | --- |
+| `detect_installation` | none | Read-only candidates under `%LOCALAPPDATA%\CapCut\Apps` and `%PROGRAMFILES%\CapCut`. |
+| `installation_plan` | none | Exact WinGet command, environment keys, and post-install steps for operator review. |
+| `install_capcut` | installs software | Requires `grant_id`; runs through the host grant, never a local shell. |
+| `auto_setup_capcut` | installs + binds | One consent-gated flow: install when missing, configure the shared runtime, load the panel, verify. Idempotent. |
+| `configure_environment` | mutates bridge config | Requires `grant_id`; returns the effective bridge URL, port, and panel path. |
+| `verify_installation` | none | Read-only readiness evidence. |
+
+## Failure recovery
+
+| Symptom | Meaning | Action |
+| --- | --- | --- |
+| `grant_id is required; obtain it from an operator-owned ui_control system grant` | A consent-gated tool was called without a grant. | Obtain the operator grant. Never substitute a local shell command or infer consent. |
+| `no CapCut executable found` | CapCut Desktop is not installed at any known candidate path. | Run `installation_plan`, have an operator approve it, then `install_capcut` with the grant. |
+| `no visible CapCut main window was found` | Installed but not running, or minimized/off-screen. | Launch CapCut and complete first-run prompts manually; leave the main window visible and restored. |
+| `multiple visible CapCut main windows were found` | The binding is ambiguous and is deliberately refused. | Close the extra CapCut windows. |
+| `dcc-cua window inventory is unavailable` | The inventory CLI is missing or hung. | Install `dcc-cua` on `PATH`, restart a hung process, re-run the doctor. |
+| `the bundled panel payload is incomplete` | The wheel was installed without its panel payload. | Reinstall the adapter wheel. |
+| `CapCut bridge did not respond; open the bundled panel` | The broker is up but no panel drained the action within 30 s. | Load the panel in the CapCut extension host, confirm `/health` shows `panel_connected: true`, retry. |
+| `127.0.0.1:<port> is already in use` | Another instance owns the loopback port. | Stop it, or set `DCC_MCP_CAPCUT_BRIDGE_PORT` to a free port and restart. |
+
+## Acceptance
+
+`verify_installation` reports `ready: true` only when **all** of the following
+hold. Do not treat a partial result as readiness:
+
+- `installed` — the CapCut executable exists.
+- `bridge_token_configured` — a token is set (use a per-user secret, not the
+  default `dev-token`).
+- `exact_window_bound` — both `DCC_MCP_CAPCUT_PID` and
+  `DCC_MCP_CAPCUT_WINDOW_HANDLE` resolve to positive integers.
+- `bridge_reachable` — `GET /health` answers `ok`.
+- `panel_connected` — the panel polled `/next` within the 35 s lease.
+
+Then confirm with `inspect_project` from `capcut-project` before any mutation.
+
+## Boundaries
+
+- This skill never shells out to an installer, never edits the registry, and
+  never installs software silently. Installation runs only through an
+  operator-owned grant.
+- `auto_setup_capcut` must not report readiness before the process, bridge
+  health, panel load, and exact PID/HWND binding are all verified.
+- Installing this adapter grants no CapCut license. CapCut is a closed-source
+  run-time dependency and is not redistributed here.
+
+## References
+
+- [host boundary](../references/host-boundary.md)
+- [dependencies and notices](../references/dependencies-and-notices.md)
+- [troubleshooting](../references/troubleshooting.md)

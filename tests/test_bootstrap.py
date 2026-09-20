@@ -75,3 +75,41 @@ def test_explicit_binding_preserves_localized_dialog_title():
 def test_explicit_binding_rejects_invalid_identity(pid, handle):
     with pytest.raises(CapCutBindingError):
         select_capcut_window([], pid=pid, window_handle=handle)
+
+
+def test_select_capcut_window_binds_jianyingpro_main_window():
+    """剪映专业版 (JianyingPro) is bindable: its titles are localised, so the
+    executable name is the discriminator rather than a pinned window title."""
+    binding = select_capcut_window(
+        [
+            {
+                "app_name": "JianyingPro.exe",
+                "pid": 77,
+                "window_id": 1234,
+                "title": "剪映专业版",
+                "is_on_screen": True,
+                "minimized": False,
+                "bounds": {"width": 1920, "height": 1080},
+            }
+        ]
+    )
+    assert binding.pid == 77
+    assert binding.window_handle == 1234
+
+
+def test_select_capcut_window_ignores_unrelated_processes():
+    """Only ByteDance editor executables are ever bound."""
+    with pytest.raises(CapCutBindingError, match="no visible"):
+        select_capcut_window(
+            [
+                {
+                    "app_name": "explorer.exe",
+                    "pid": 7,
+                    "window_id": 8,
+                    "title": "CapCut",
+                    "is_on_screen": True,
+                    "minimized": False,
+                    "bounds": {"width": 1920, "height": 1080},
+                }
+            ]
+        )

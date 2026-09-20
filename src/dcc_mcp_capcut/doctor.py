@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from .__version__ import __version__
-from .bootstrap import CapCutBindingError, select_capcut_window
+from .bootstrap import CapCutBindingError, flavor_by_exe, select_capcut_window
 from .installer import WINGET_COMMAND, detect_installation, verify_installation
 
 OK = "ok"
@@ -324,7 +324,7 @@ def check_dcc_cua() -> Check:
             hint="Reinstall dcc-cua so 'dcc-cua list' emits a JSON array of windows.",
         )
     capcut_windows = [
-        window for window in inventory if str(window.get("app_name", "")).casefold() == "capcut.exe"
+        window for window in inventory if flavor_by_exe(window.get("app_name", "")) is not None
     ]
     try:
         binding = select_capcut_window(inventory)

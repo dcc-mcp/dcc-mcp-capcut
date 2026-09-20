@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from .installer import HOST_FLAVORS
 from .server import start_server, stop_server
 
 
@@ -26,6 +27,23 @@ class CapCutWindowBinding:
     title: str = "CapCut"
 
 
+def flavor_by_exe(app_name: str):
+    """Return the host flavour owning this executable name, or None."""
+    normalized = str(app_name).casefold()
+    return next((flavor for flavor in HOST_FLAVORS if flavor.exe.casefold() == normalized), None)
+
+
+def _title_matches(window: dict[str, Any], flavor, *, bound: bool) -> bool:
+    if bound:
+        return True
+    if flavor.window_title is None:
+        # The flavour has no pinned main-window title; the executable name is
+        # the discriminator, so every visible top-level window of that process
+        # is eligible.
+        return True
+    return str(window.get("title", "")).casefold() == flavor.window_title.casefold()
+
+
 def select_capcut_window(
     windows: list[dict[str, Any]], *, pid: int | None = None, window_handle: int | None = None
 ) -> CapCutWindowBinding:
@@ -37,9 +55,10 @@ def select_capcut_window(
     candidates = [
         window
         for window in windows
-        if str(window.get("app_name", "")).casefold() == "capcut.exe"
+        if (flavor := flavor_by_exe(window.get("app_name", ""))) is not None
+        and _title_matches(window, flavor, bound=pid is not None)
         and (
-            str(window.get("title", "")).casefold() == "capcut"
+            True
             if pid is None
             else window.get("pid") == pid and window.get("window_id") == window_handle
         )

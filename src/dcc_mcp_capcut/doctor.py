@@ -324,9 +324,7 @@ def check_dcc_cua() -> Check:
             hint="Reinstall dcc-cua so 'dcc-cua list' emits a JSON array of windows.",
         )
     capcut_windows = [
-        window
-        for window in inventory
-        if flavor_by_exe(window.get("app_name", "")) is not None
+        window for window in inventory if flavor_by_exe(window.get("app_name", "")) is not None
     ]
     try:
         binding = select_capcut_window(inventory)

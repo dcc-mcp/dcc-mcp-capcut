@@ -24,8 +24,9 @@ value read, or invocation capability.
 
 ## Prerequisites
 
-All five must be set; the probe is otherwise unavailable and `capcut-native`
-stays unusable by design:
+All four variables below must be set; the probe is otherwise unavailable and
+`capcut-native` stays unusable by design. The probe binary itself is a separate
+build requirement, not a variable — see the paragraph after the table.
 
 | Variable | Requirement |
 | --- | --- |

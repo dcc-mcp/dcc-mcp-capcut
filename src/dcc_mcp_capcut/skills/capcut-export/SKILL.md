@@ -31,11 +31,16 @@ If any of these is unproven, run `capcut-setup` first.
 
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
-| `export_video` | yes | yes | `output_path`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`. Returns `job_id` and `output_path`. |
-| `get_export_status` | no | yes | Progress plus output validation for a `job_id`. |
-| `cancel_export` | yes | yes | Cancel a running job; cancelling twice is safe. |
-| `export_thumbnail` | yes | yes | Still frame at `time`; returns `job_id` and `output_path`. |
-| `build_vlog_demo` | yes | no | Full short-form recipe from media, captions, music, and export settings. |
+| `export_video` | yes | yes | Async. `output_path` plus optional `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`. Returns `job_id` or `output_path`; poll `get_export_status` with the `job_id`. |
+| `get_export_status` | no | yes | Progress and terminal state for a `job_id`, plus output validation. Completeness is only proved by a reported success **and** an on-disk file. |
+| `cancel_export` | yes | yes | `job_id` of a running job. Idempotent: cancelling twice is safe. Needs `verification.ok: true`; returns no stable ID, so confirm the terminal state with `get_export_status`. |
+| `export_thumbnail` | yes | yes | Still frame at `time`; returns `job_id` or `output_path`. |
+| `build_vlog_demo` | yes | no | Async. `media` (list) plus optional `project_name`, `music`, `captions`, `output_path`, `aspect_ratio`. Not idempotent. |
+
+`export_video` and `build_vlog_demo` only acknowledge a job on return: the
+`output_path` they carry back is the requested destination, not proof that a file
+exists. See the submit/completion contract in
+`references/export-and-verification.md`.
 
 ## Failure recovery
 

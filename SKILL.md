@@ -20,9 +20,14 @@ description of any CapCut capability.
   `src/dcc_mcp_capcut/skills/capcut-*` with `dcc-mcp-cli lint --warnings-as-errors`
   and nothing else. Do not add capability documentation here: it would become an
   unmaintained second source of truth that no check reads.
-- CapCut Desktop has no stable public Python API. Every capability below runs
-  through a typed, token-authenticated loopback bridge and the bundled CapCut-side
-  panel. See `src/dcc_mcp_capcut/skills/references/host-boundary.md`.
+- CapCut Desktop has no stable public Python API. Every capability below that
+  drives the host runs through a typed, token-authenticated loopback bridge and
+  the bundled CapCut-side panel, and therefore needs `capcut-setup` first. Two
+  skills are exempt: `capcut-interchange` runs host-free from supplied edit
+  decisions, and `capcut-native` talks to the optional Qt probe endpoint instead
+  of the bridge and panel (it still needs the bound host PID). Do not run
+  `capcut-setup`, and do not reject a call, for those two.
+  See `src/dcc_mcp_capcut/skills/references/host-boundary.md`.
 
 ## Skill index
 

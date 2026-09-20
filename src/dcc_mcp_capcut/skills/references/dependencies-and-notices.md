@@ -25,7 +25,7 @@ packages you install, and only to those packages.
 
 | Dependency | Used by | License | Notes |
 | --- | --- | --- | --- |
-| FFmpeg / ffprobe | `demo/render_vlog.py` only | LGPL or GPL depending on the build | External binaries resolved from `PATH`; never shipped with this wheel. Run `ffmpeg -version` to read the exact license and configuration of the build you use. |
+| FFmpeg / ffprobe | `demo/render_vlog.py`; operator-side validation of exported renders (`ffprobe` in `capcut-export` acceptance) | LGPL or GPL depending on the build | External binaries resolved from `PATH`; never shipped with this wheel. Export verification is an operator-side validation dependency: the adapter only calls `ffprobe` through documented acceptance steps, it does not vendor or redistribute it. Run `ffmpeg -version` to read the exact license and configuration of the build you use. |
 | Qt SDK (Qt6 `Core`, `Gui`, `Network`) | build/test of the optional native probe in `native/qt-probe` | LGPLv3 / GPLv2+ / commercial, depending on the SDK you build with | CI pins Qt `6.2.2`. No Qt binary ships in this wheel. A published probe bundle inherits the obligations of the SDK it was built against — confirm your SDK's license before distributing one. |
 | CapCut Desktop | the whole adapter | Proprietary, closed source | A run-time dependency. Not distributed, not modified, not reverse engineered. Installed with the operator-confirmed `winget install --id ByteDance.CapCut --exact` plan. |
 | `dcc-mcp-runtime` | the `dcc-mcp-capcut-runtime` entry point | Distributed as a separately verified bundle | Not a PyPI dependency; the runtime entry point refuses to start without it. |

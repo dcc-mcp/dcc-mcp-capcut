@@ -29,7 +29,7 @@ If any of these is unproven, run `capcut-setup` first.
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
 | `add_audio` | yes | no | `media_id` and `start`; optional `source_in`, `source_out`, `beat_sync`; returns `audio_id`. |
-| `set_audio_volume` | yes | yes | `volume` in `0..4`, plus optional `keyframes`; re-applying is safe. |
+| `set_audio_volume` | yes | yes | `clip_id` plus `volume` in `0..4` inclusive (`1.0` is unity), optional `keyframes`; re-applying is safe. |
 | `add_audio_fade` | yes | yes | `fade_in` / `fade_out` in seconds; re-applying is safe. |
 | `remove_audio` | yes | no | Removes the clip from the timeline. |
 
@@ -41,7 +41,7 @@ If any of these is unproven, run `capcut-setup` first.
 | `forbidden` (HTTP 403) | Bridge token mismatch. | Align `DCC_MCP_CAPCUT_BRIDGE_TOKEN` on both sides and restart both. |
 | `CapCut action 'add_audio' did not return audio_id` | The host acknowledged without a stable ID. | Fix the host integration per `capcut_panel/HOST_API.md`. |
 | `CapCut action '<action>' lacks timeline readback` | A timeline mutation omitted `verification.timeline`. | Same as above. |
-| Volume request rejected | `volume` outside the `0..4` range. | Clamp to `0..4`; `1.0` is unity. |
+| Volume request rejected | `volume` outside the `0..4` range; the call fails closed instead of being adjusted. | Never clamp silently. Report the rejected value, confirm the intended level with whoever asked for the mix, then re-submit an in-range `volume`. `1.0` is unity. |
 | Audio duplicated | `add_audio` is not idempotent and was retried after a partial failure. | Re-read the timeline, delete the duplicate, then re-add once. |
 | `set_audio_volume` has no audible effect | A keyframe envelope or a downstream track gain overrides the clip level. | Inspect the envelope and the track's own level; do not keep raising the clip gain. |
 
@@ -54,6 +54,8 @@ If any of these is unproven, run `capcut-setup` first.
 - Every mutation carried `verification: {ok: true, ...}` and an authoritative
   `verification.timeline`.
 - Levels are checked on the full mix, not on a soloed track, before delivery.
+- A rejected `volume` was re-submitted with an explicitly confirmed value, not
+  with a silently clamped one.
 
 ## Boundaries
 

@@ -12,7 +12,10 @@ A mutation result must satisfy all three rules that apply to it:
 1. `result` is a JSON object (`CapCut action '<action>' returned a non-object result`).
 2. `verification` is an object and `verification.ok` is `true`
    (`CapCut action '<action>' lacks verified post-operation readback`).
-3. The action's required stable ID is present and non-empty:
+3. The action's required stable ID is present and non-empty. Where a row lists
+   two alternatives joined by **or**, either one satisfies the check — the
+   adapter accepts the result when **at least one** of the named keys carries a
+   non-empty value, so an action is never rejected for supplying only one of them:
 
 | Action | Required ID |
 | --- | --- |
@@ -24,13 +27,17 @@ A mutation result must satisfy all three rules that apply to it:
 | `auto_captions` | `caption_ids` or `job_id` |
 | `create_project` | `project_id` |
 | `create_timeline` | `timeline_id` |
-| `export_thumbnail` | `job_id`, `output_path` |
-| `export_video` | `job_id`, `output_path` |
-| `generate_proxy` | `job_id`, `proxy_id` |
+| `export_thumbnail` | `job_id` or `output_path` |
+| `export_video` | `job_id` or `output_path` |
+| `generate_proxy` | `job_id` or `proxy_id` |
 | `import_media` | `media_id` |
 | `import_subtitles` | `caption_ids` |
-| `remove_background` | `job_id`, `clip_id` |
-| `stabilize_clip` | `job_id`, `clip_id` |
+| `remove_background` | `job_id` or `clip_id` |
+| `stabilize_clip` | `job_id` or `clip_id` |
+
+   `cancel_export` is a mutation with no required stable ID of its own: it only
+   needs `verification.ok: true`, and its terminal state is read back with
+   `get_export_status`.
 
 Timeline mutations must additionally put the authoritative timeline readback
 under `verification.timeline`: `add_audio`, `add_audio_fade`, `add_clip`,
@@ -55,13 +62,33 @@ still return a JSON object.
 
 ## Export
 
-- `export_video` and `build_vlog_demo` are asynchronous. They return a `job_id`;
-  poll `get_export_status` with it rather than assuming completion.
-  `timeout_hint_secs` is 600 for `export_video` and 900 for `build_vlog_demo`.
-- `cancel_export` is destructive and idempotent: cancelling twice is safe, and a
-  cancelled job still reports through `get_export_status`.
-- `export_thumbnail` returns `job_id` and `output_path`; it writes a still frame
-  from the active timeline at the requested time.
+### Submitting an asynchronous export
+
+- `export_video` — submit arguments: `output_path` (required), plus optional
+  `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`),
+  `width`, `height`, `fps`, `bitrate_mbps`, `audio`. The submit result is
+  accepted when it carries `job_id` or `output_path`; poll with the `job_id` when
+  the host returns one. `timeout_hint_secs` is 600.
+- `build_vlog_demo` — submit arguments: `media` (required list of supplied
+  media objects), plus optional `project_name`, `music`, `captions`,
+  `output_path`, `aspect_ratio` (`9:16`, `16:9`, `1:1`). `timeout_hint_secs` is
+  900. It is not idempotent: re-running builds another project and render.
+- Neither call is complete on return. The response only proves the job was
+  accepted, and an `output_path` in it is the **requested destination**, not
+  evidence that a file exists. Nothing is written to that path until the job
+  finishes — and it may still fail afterwards (codec, disk, host error).
+
+### Reading an export to completion
+
+- Poll `get_export_status` with the `job_id` until it reports a terminal state.
+  Treat only a reported success as a finished render, and only together with an
+  on-disk check of `output_path`.
+- `cancel_export` takes `job_id`, is destructive and idempotent: cancelling twice
+  is safe, a cancelled job still reports through `get_export_status`, and the
+  cancel call itself needs `verification.ok: true` but returns no stable ID.
+- `export_thumbnail` is a synchronous still-frame render: it returns `job_id` or
+  `output_path` and writes the frame from the active timeline at the requested
+  time.
 - Acceptance: `get_export_status` reports success **and** `output_path` points at
   a file that exists on disk. Independently probe the artifact with `ffprobe`
   (duration, streams, dimensions) before declaring a render delivered. ffprobe

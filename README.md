@@ -38,8 +38,11 @@ the CapCut process, because the panel is what drains the bridge queue — see
 for what the panel is, what it requires, and how to confirm it is connected.
 That guide also records the current limit: **this package ships the panel
 payload but no automatic loader**, so injecting it is operator-owned,
-consent-gated work. Until a panel is hosted, `panel_connected` stays `false`
-and every host action times out after 30 s.
+consent-gated work. Until something polls the bridge, `panel_connected` stays
+`false` and host actions stay queued until the request timeout elapses. Treat
+`panel_connected` as a liveness signal for a poller, not as proof that
+`window.CapCut` exists: a panel opened in a normal browser also reports `true`
+while every host action fails immediately.
 
 Verify with `GET /health` on the bridge URL, and set
 `DCC_MCP_CAPCUT_BRIDGE_TOKEN` to a per-user secret for production use.

@@ -2,8 +2,7 @@
 
 This file explains what the bundled panel is, what it needs in order to run,
 and how to confirm it is connected. Read it before trying to drive any
-host-bound capability: without a running panel, every host action fails with a
-bridge timeout.
+host-bound capability: without a working panel, no host action can complete.
 
 ## Why this is required
 
@@ -19,8 +18,16 @@ MCP client -> dcc-mcp-capcut server -> bridge queue (/call)
                                     window.CapCut.dispatch(action, params)
 ```
 
-Without the panel nothing drains the queue. After `BRIDGE_TIMEOUT_SECONDS`
-(30 s) the bridge abandons the request and the action fails.
+Without the panel nothing drains the queue, so the request is eventually
+abandoned. `CapCutBridge.submit()` waits on the result event with a `timeout`
+parameter whose default is 30 s (`src/dcc_mcp_capcut/bridge.py`); skill calls
+reach it through `call_bridge()`, whose `urlopen(..., timeout=35)` bounds the
+whole round trip. Neither value is an environment variable or config setting —
+both are hard-coded keyword defaults, so there is nothing to tune.
+
+A poller that is alive but has no `window.CapCut` does **not** hit that timeout:
+it takes the job and fails it immediately. Do not treat "it failed fast" as
+evidence that a panel was connected.
 
 ## What the panel is
 
@@ -68,6 +75,15 @@ Two consequences worth stating plainly:
   but **the loader that places this page into that host is supplied by the
   CapCut-side host integration, not by this package.**
 
+  That description comes from inspecting CapCut Desktop installs, not from
+  anything this repository tests, so verify it on your own machine before
+  relying on it. Take the install directory from the doctor's
+  `capcut_executable` line and probe it:
+
+  ```powershell
+  where.exe /R "<CapCut install directory>" CefCreator.dll PlatinumWebView.dll
+  ```
+
 ## Status: no loader ships with this package
 
 **This repository does not currently ship a supported, automatic way to inject
@@ -86,8 +102,11 @@ So the practical position today:
 - The panel **can** be built and verified as a payload (see below).
 - Getting it running inside CapCut requires a CapCut-side host integration,
   which is operator/owner work and is out of scope for this package.
-- Until that integration exists, `panel_connected` stays `false` and all
-  host-bound capabilities remain unverifiable.
+- Until that integration exists, no host-bound capability can complete —
+  either nothing polls the bridge (so `panel_connected` stays `false`), or a
+  page polls it from outside CapCut (so `panel_connected` turns `true` while
+  every action still fails immediately). Reading `panel_connected` alone does
+  not distinguish those two cases; see the next section.
 
 ## Verifying the panel payload
 
@@ -103,8 +122,8 @@ Expected files, relative to the installed package's `capcut_panel/` directory:
 
 ## Verifying the panel is actually connected
 
-The authoritative signal is the bridge health endpoint, which reports whether a
-panel has been seen within the lease window:
+The bridge health endpoint reports whether a panel has been seen within the
+lease window:
 
 ```bash
 curl -H "X-DCC-MCP-Token: $DCC_MCP_CAPCUT_BRIDGE_TOKEN" \
@@ -115,10 +134,24 @@ curl -H "X-DCC-MCP-Token: $DCC_MCP_CAPCUT_BRIDGE_TOKEN" \
 {"ok": true, "pending": 0, "panel_connected": true}
 ```
 
-- `panel_connected: true` — a panel polled `/next` within the lease window.
-  Host actions will be dispatched.
-- `panel_connected: false` — nothing is draining the queue. Host actions will
-  time out after 30 s.
+`panel_connected` is a **liveness signal for a poller**, not a readiness
+prognosis for the host. `CapCutBridge.next()` records the poll timestamp as soon
+as `/next` is called, before the panel ever looks at `window.CapCut`, so any
+page that can reach the bridge turns this flag on — including the panel opened
+in a normal browser, which can never dispatch anything.
+
+- `panel_connected: true` — a page polled `/next` within the lease window
+  (`CapCutBridge.PANEL_LEASE_SECONDS`, 35 s). Host actions will be picked up
+  and *attempted*. They still fail immediately if that page has no
+  `window.CapCut`, so this flag does **not** mean "connected to CapCut".
+- `panel_connected: false` — nothing has polled `/next` within the lease
+  window, so nothing is draining the queue. Host actions stay queued until the
+  request timeout expires.
+
+The two states a poller can be in — inside CapCut with a working
+`window.CapCut`, or outside it without one — both report `panel_connected:
+true`. The only evidence that separates them is a host action that actually
+succeeds.
 
 `verify_installation()` reports the same value as `panel_connected`, and its
 `ready` flag requires it. A successful end-to-end setup therefore looks like:
@@ -130,15 +163,31 @@ curl -H "X-DCC-MCP-Token: $DCC_MCP_CAPCUT_BRIDGE_TOKEN" \
 [  ok]  panel_files        the bundled panel payload is complete
 ```
 
-with `panel_connected: true` once the panel is hosted.
+with `panel_connected: true` once the panel is polling — remembering that this
+flag alone does not prove the host API is reachable.
 
 ## Troubleshooting
 
+`call_bridge()` uses `urlopen`, which raises on a non-2xx status without
+reading the body, so a failed action always surfaces as `HTTP Error 503: Service
+Unavailable` no matter which of the two causes below produced it. `/health`
+cannot separate them either: in the host-API case it happily reports
+`panel_connected: true`. To see which message the bridge actually returned, call
+it directly and read the body:
+
+```bash
+curl -i -H "Content-Type: application/json" \
+     -H "X-DCC-MCP-Token: ${DCC_MCP_CAPCUT_BRIDGE_TOKEN:-dev-token}" \
+     -d '{"action":"<action>","params":{}}' \
+     http://127.0.0.1:47410/call
+```
+
 | Symptom | Meaning | Action |
 | --- | --- | --- |
-| `HTTP Error 503: Service Unavailable` | No panel drained the queue within 30 s. | Confirm a panel is running **inside** CapCut and re-check `/health`. |
-| `CapCut bridge did not respond; open the bundled panel` (response body) | Same cause. Note the adapter surfaces only `HTTP Error 503`, not this string. | Same as above. |
-| `CapCut host API is unavailable; install the matching panel build` | The panel is loaded but `window.CapCut` is not injected — typically opened in a normal browser rather than inside CapCut. | Load it through a CapCut-side host integration that provides `window.CapCut`. |
+| `HTTP Error 503: Service Unavailable` | The action did not complete. Either nothing polled the bridge within the request timeout, or the poller had no `window.CapCut`. | Read the `/call` response body (command above) to tell the two apart. |
+| `CapCut bridge did not respond; open the bundled panel` (response body) | No panel drained the queue within 30 s. Note the adapter surfaces only `HTTP Error 503`, not this string. | Confirm a panel is polling **inside** CapCut, then retry. |
+| `CapCut host API is unavailable; install the matching panel build` (response body) | A page is polling the bridge, but `window.CapCut` is not injected — typically the panel was opened in a normal browser rather than inside CapCut. The adapter surfaces only `HTTP Error 503`, not this string. | Load it through a CapCut-side host integration that provides `window.CapCut`. |
+| `/health` shows `panel_connected: true`, but every action fails | The poller is alive and takes each job, then fails before any CapCut edit. This is the normal-browser case, and `/health` is not able to rule it out. | Read the `/call` response body to confirm which of the two strings above came back; only a successful action proves the host is real. |
 | `panel_files` fails in doctor | The payload is incomplete in the installed package. | Reinstall; check `capcut_panel/` contains all three files. |
 | `/health` returns 403 | Token mismatch between the panel and the bridge. | Align `DCC_MCP_CAPCUT_BRIDGE_TOKEN` on both sides. |
 

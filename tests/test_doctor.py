@@ -242,30 +242,62 @@ def test_runtime_probe_does_not_mutate_the_environment(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_executable_check_passes_when_installed(monkeypatch):
+def test_executable_check_passes_when_installed(pin_platform, monkeypatch):
+    provider = pin_platform("windows")
     monkeypatch.setattr(
-        doctor,
+        type(provider),
         "detect_installation",
-        lambda: {"installed": True, "executable": "C:/CapCut/CapCut.exe"},
+        lambda _self: {"installed": True, "executable": "C:/CapCut/CapCut.exe"},
     )
     check = doctor.check_capcut_executable()
     assert check.status == doctor.OK
     assert "CapCut.exe" in check.summary
 
 
-def test_executable_check_fails_on_windows_when_missing(monkeypatch):
-    monkeypatch.setattr(doctor, "detect_installation", lambda: {"installed": False})
-    monkeypatch.setattr(os, "name", "nt")
+def test_executable_check_fails_on_windows_when_missing(pin_platform, monkeypatch):
+    provider = pin_platform("windows")
+    monkeypatch.setattr(type(provider), "detect_installation", lambda _self: {"installed": False})
     check = doctor.check_capcut_executable()
     assert check.status == doctor.FAIL
     assert "winget" in check.hint
 
 
-def test_executable_check_skips_off_windows(monkeypatch):
-    monkeypatch.setattr(doctor, "detect_installation", lambda: {"installed": False})
-    monkeypatch.setattr(os, "name", "posix")
+def test_executable_check_reports_the_macos_bundle(pin_platform, monkeypatch):
+    """macOS is a real diagnostic path, not a skipped one."""
+    provider = pin_platform("macos")
+    monkeypatch.setattr(
+        type(provider),
+        "detect_installation",
+        lambda _self: {
+            "installed": True,
+            "app_bundle": "/Applications/JianyingPro.app",
+            "bundle_version": "6.9.0",
+        },
+    )
+    check = doctor.check_capcut_executable()
+    assert check.status == doctor.OK
+    assert "/Applications/JianyingPro.app" in check.summary
+    assert "6.9.0" in check.summary
+
+
+def test_executable_check_fails_on_macos_when_missing(pin_platform, monkeypatch):
+    """A missing macOS host is a failed prerequisite, not a skip."""
+    provider = pin_platform("macos")
+    monkeypatch.setattr(type(provider), "detect_installation", lambda _self: {"installed": False})
+    check = doctor.check_capcut_executable()
+    assert check.status == doctor.FAIL
+    assert "brew install --cask" in check.hint
+    assert "Accessibility" in check.hint
+
+
+def test_executable_check_reports_linux_as_unsupported(pin_platform):
+    """Linux gets an explicit conclusion with a reason, never a silent skip."""
+    pin_platform("linux")
     check = doctor.check_capcut_executable()
     assert check.status == doctor.SKIP
+    assert "unsupported" in check.summary.lower()
+    assert check.detail["unsupported"] is True
+    assert check.detail["reason"]
     assert check.hint
 
 
@@ -274,15 +306,54 @@ def test_executable_check_skips_off_windows(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_cua_check_skips_off_windows(monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
+def test_cua_check_skips_on_linux(pin_platform):
+    """No official client exists, so no window inventory is attempted."""
+    pin_platform("linux")
     check = doctor.check_dcc_cua()
     assert check.status == doctor.SKIP
+    assert "unsupported" in check.summary.lower()
     assert check.hint
 
 
-def test_cua_check_fails_when_the_cli_is_missing(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_warns_on_macos_without_the_cli(pin_platform, monkeypatch):
+    """macOS window binding is real but still being validated, and it depends on
+    a user-granted Accessibility permission, so a missing CLI degrades rather
+    than fails."""
+    pin_platform("macos")
+
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError("dcc-cua")
+
+    monkeypatch.setattr(doctor, "_dcc_cua_inventory", missing)
+    check = doctor.check_dcc_cua()
+    assert check.status == doctor.WARN
+    assert "Accessibility" in check.hint
+
+
+def test_cua_check_binds_a_macos_bundle_window(pin_platform, monkeypatch):
+    pin_platform("macos")
+    monkeypatch.setattr(
+        doctor,
+        "_dcc_cua_inventory",
+        lambda *_a, **_k: [
+            {
+                "app_name": "CapCut",
+                "pid": 512,
+                "window_id": 4096,
+                "title": "CapCut",
+                "is_on_screen": True,
+                "minimized": False,
+                "bounds": {"width": 1728, "height": 1117},
+            }
+        ],
+    )
+    check = doctor.check_dcc_cua()
+    assert check.status == doctor.OK
+    assert check.detail["pid"] == 512
+
+
+def test_cua_check_fails_when_the_cli_is_missing(pin_platform, monkeypatch):
+    pin_platform("windows")
 
     def missing(*_args, **_kwargs):
         raise FileNotFoundError("dcc-cua")
@@ -294,8 +365,8 @@ def test_cua_check_fails_when_the_cli_is_missing(monkeypatch):
     assert check.hint
 
 
-def test_cua_check_fails_when_the_cli_times_out(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_fails_when_the_cli_times_out(pin_platform, monkeypatch):
+    pin_platform("windows")
 
     def stalled(*_args, **_kwargs):
         raise subprocess.TimeoutExpired(cmd="dcc-cua list", timeout=15)
@@ -306,8 +377,8 @@ def test_cua_check_fails_when_the_cli_times_out(monkeypatch):
     assert "timed out" in check.summary
 
 
-def test_cua_check_fails_when_the_cli_exits_nonzero(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_fails_when_the_cli_exits_nonzero(pin_platform, monkeypatch):
+    pin_platform("windows")
 
     def failed(*_args, **_kwargs):
         raise subprocess.CalledProcessError(returncode=3, cmd="dcc-cua list")
@@ -318,8 +389,8 @@ def test_cua_check_fails_when_the_cli_exits_nonzero(monkeypatch):
     assert "exited with 3" in check.summary
 
 
-def test_cua_check_fails_on_invalid_inventory(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_fails_on_invalid_inventory(pin_platform, monkeypatch):
+    pin_platform("windows")
 
     def invalid(*_args, **_kwargs):
         raise json.JSONDecodeError("no json", doc="", pos=0)
@@ -330,8 +401,8 @@ def test_cua_check_fails_on_invalid_inventory(monkeypatch):
     assert "invalid" in check.summary
 
 
-def test_cua_check_fails_when_no_window_is_open(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_fails_when_no_window_is_open(pin_platform, monkeypatch):
+    pin_platform("windows")
     monkeypatch.setattr(
         doctor, "_dcc_cua_inventory", lambda *_a, **_k: [{"app_name": "notepad.exe"}]
     )
@@ -341,8 +412,8 @@ def test_cua_check_fails_when_no_window_is_open(monkeypatch):
     assert "Launch CapCut" in check.hint
 
 
-def test_cua_check_fails_on_ambiguous_windows(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_fails_on_ambiguous_windows(pin_platform, monkeypatch):
+    pin_platform("windows")
     monkeypatch.setattr(
         doctor, "_dcc_cua_inventory", lambda *_a, **_k: [_window(1, 2), _window(3, 4)]
     )
@@ -352,8 +423,8 @@ def test_cua_check_fails_on_ambiguous_windows(monkeypatch):
     assert "exactly one" in check.hint
 
 
-def test_cua_check_passes_on_one_visible_window(monkeypatch):
-    monkeypatch.setattr(os, "name", "nt")
+def test_cua_check_passes_on_one_visible_window(pin_platform, monkeypatch):
+    pin_platform("windows")
     monkeypatch.setattr(doctor, "_dcc_cua_inventory", lambda *_a, **_k: [_window(42, 99)])
     check = doctor.check_dcc_cua()
     assert check.status == doctor.OK
@@ -499,8 +570,8 @@ def test_otio_check_passes_when_importable(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_run_checks_covers_every_registered_check(monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
+def test_run_checks_covers_every_registered_check(pin_platform):
+    pin_platform("linux")
     checks = doctor.run_checks()
     assert [check.name for check in checks] == [name for name, _ in doctor.CHECKS]
 
@@ -594,8 +665,8 @@ def test_cli_rejects_unknown_flags():
     assert raised.value.code == 2
 
 
-def test_doctor_never_mutates_the_environment(monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
+def test_doctor_never_mutates_the_environment(pin_platform):
+    pin_platform("linux")
     before = dict(os.environ)
     doctor.run_doctor()
     assert dict(os.environ) == before

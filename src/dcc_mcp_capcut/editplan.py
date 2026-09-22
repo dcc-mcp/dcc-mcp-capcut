@@ -53,18 +53,20 @@ CANVAS_PRESETS: dict[str, tuple[int, int]] = {
 
 SUBTITLE_FORMATS = ("srt", "lrc", "ass")
 
+#: Upper bound for advisory audio level, matching set_audio_volume's schema.
+MAX_VOLUME = 4.0
+
 MEDIA_PLACEHOLDER = "$media:"
 TIMELINE_PLACEHOLDER = "$timeline"
 CLIP_PLACEHOLDER = "$clip:"
 
-# A host that does not implement a batch action rejects it with one of these
-# markers; see capcut_panel/HOST_API.md. Anything else is a real failure and is
-# never silently retried as a composed script.
+# The markers a host uses to reject an action it does not implement; see
+# capcut_panel/HOST_API.md. Deliberately narrow: a wider set turns unrelated
+# host errors into a fallback that replays the same plan as a composed script
+# after the batch action may already have applied part of it.
 UNSUPPORTED_ACTION_MARKERS = (
     "unsupported action",
     "unsupported_action",
-    "unknown action",
-    "unknown_action",
 )
 
 
@@ -159,13 +161,20 @@ def _normalize_relative_path(value: Any, label: str) -> str:
     return relative_media(candidate)
 
 
-def _optional_number(value: Any, label: str, minimum: float = 0.0) -> Optional[float]:
+def _optional_number(
+    value: Any,
+    label: str,
+    minimum: float = 0.0,
+    maximum: Optional[float] = None,
+) -> Optional[float]:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{label} must be a finite number")
     if value < minimum:
         raise ValueError(f"{label} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{label} must be <= {maximum}")
     return float(value)
 
 
@@ -213,7 +222,14 @@ def _validate_clip(spec: Any, track_name: str, index: int) -> dict:
         clip["audio"] = {
             key: value
             for key, value in (
-                ("volume", _optional_number(audio.get("volume"), f"{label} audio volume")),
+                (
+                    "volume",
+                    # Matches set_audio_volume's own schema, so an out-of-range
+                    # level fails at compile time instead of at the host.
+                    _optional_number(
+                        audio.get("volume"), f"{label} audio volume", maximum=MAX_VOLUME
+                    ),
+                ),
                 ("fade_in", _optional_number(audio.get("fade_in"), f"{label} audio fade_in")),
                 ("fade_out", _optional_number(audio.get("fade_out"), f"{label} audio fade_out")),
             )
@@ -465,7 +481,12 @@ def compile_recipe(
                 "audio": {
                     key: value
                     for key, value in (
-                        ("volume", _optional_number(music.get("volume"), "music volume")),
+                        (
+                            "volume",
+                            _optional_number(
+                                music.get("volume"), "music volume", maximum=MAX_VOLUME
+                            ),
+                        ),
                         ("fade_in", _optional_number(music.get("fade_in"), "music fade_in")),
                         ("fade_out", _optional_number(music.get("fade_out"), "music fade_out")),
                     )
@@ -637,10 +658,20 @@ def plan_to_actions(
             media_keys[clip["media"]] = key
             media_order.append(clip["media"])
 
+    # The subtitle file is a referenced file too: it is handed to the host as a
+    # path just like the media is. Checking it here -- with the clip media, in
+    # one pass -- is what keeps "every referenced file must exist" true before
+    # the first dispatch, rather than failing at import_subtitles after the
+    # timeline has already been populated.
+    subtitle = normalized.get("subtitle")
+    referenced = list(media_order)
+    if subtitle is not None and subtitle["file"] not in referenced:
+        referenced.append(subtitle["file"])
+
     resolved = media_order
     if media_dir is not None:
         base = Path(media_dir).resolve()
-        missing = [path for path in media_order if not (base / path).is_file()]
+        missing = [path for path in referenced if not (base / path).is_file()]
         if missing:
             raise ValueError(
                 "media_dir does not contain every referenced file: "
@@ -717,7 +748,6 @@ def plan_to_actions(
                 params["fade_out"] = audio["fade_out"]
             actions.append({"action": "add_audio_fade", "params": params})
 
-    subtitle = normalized.get("subtitle")
     if subtitle is not None:
         subtitle_path = subtitle["file"]
         if media_dir is not None:
@@ -763,15 +793,28 @@ def plan_to_actions(
 
     actions.append({"action": "save_project", "params": {}})
     return {
+        # `media` is the placeholder map for imported clips; `referenced` is the
+        # complete set of files a dispatch will need, so a dry run can be
+        # checked against a delivery directory without reading the actions.
         "media": {media_keys[path]: path for path in media_order},
+        "referenced": referenced,
         "actions": actions,
     }
 
 
-def is_unsupported_action(error: BaseException) -> bool:
-    """Report whether a host rejection means "this action is not implemented"."""
+def is_unsupported_action(error: BaseException, action: str = "apply_edit_plan") -> bool:
+    """Report whether a host rejection means "this exact action is not implemented".
+
+    Both the marker and the action name must be present. The marker alone is not
+    enough: ``unsupported action parameter`` or a rejection naming a *different*
+    action are real failures, and treating them as "not implemented" would replay
+    the plan as a composed script over a timeline the batch action may have
+    already partly assembled.
+    """
     message = str(error).lower()
-    return any(marker in message for marker in UNSUPPORTED_ACTION_MARKERS)
+    return any(
+        marker in message and action.lower() in message for marker in UNSUPPORTED_ACTION_MARKERS
+    )
 
 
 def substitute_placeholders(params: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

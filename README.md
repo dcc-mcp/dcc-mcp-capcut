@@ -74,7 +74,8 @@ notes. Run `python demo/fetch_assets.py`, then `python demo/render_vlog.py` for
 an offline 9:16 proof in `demo/output/free-travel-vlog.mp4`. The render is
 driven by the canonical edit plan and writes it to
 `demo/output/free-travel-vlog.plan.json`; feed that file to `apply_edit_plan`
-with `media_dir` set to `demo/assets` for a native CapCut project.
+with `media_dir` set to `demo/` for a native CapCut project. That directory is
+the delivery root the plan's portable relative paths resolve against.
 
 ## Canonical edit plan
 
@@ -90,7 +91,9 @@ normalises a plan or a vlog recipe into it, and three links consume it:
 
 All three share one set of rules, so a plan that compiles is a plan every link
 accepts — previously the vlog recipe and the OTIO exporter disagreed about
-whether two clips on one track could overlap.
+whether two clips on one track could overlap. The one exception is OTIO export,
+which additionally requires `media_duration` on every clip because it will not
+write an `available_range` it cannot prove.
 
 Assembly is one call instead of a hand-orchestrated sequence: `apply_edit_plan`
 takes a plan plus a media directory, validates it host-free, and lowers it to

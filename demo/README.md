@@ -25,12 +25,19 @@ their own copy of the rules:
   writes it next to the render as `demo/output/free-travel-vlog.plan.json`.
 
 That plan file is the hand-off to the host: feed it to `apply_edit_plan` (or
-`build_vlog_demo`) with `media_dir` pointing at `demo/assets` for a native
-CapCut project. Call `apply_edit_plan` with `dry_run: true` first to see the
-compiled plan and the exact action script without dispatching anything.
+`build_vlog_demo`) with `media_dir` set to **`demo/`** for a native CapCut
+project. Call `apply_edit_plan` with `dry_run: true` first to see the compiled
+plan and the exact action script without dispatching anything.
+
+`demo/` is the delivery root, not `demo/assets/`: the plan's portable paths are
+`assets/<media>` and `galaxy_zh.srt`, so `media_dir` has to be the directory
+those paths are relative to. Pointing at `demo/assets/` would resolve them to
+`demo/assets/assets/<media>`, which does not exist — and would fail before any
+dispatch, naming the files it could not find.
 
 Asset ids resolve to local paths through `local_path` in `assets.json`, which
-is how the id-only `music` entry in the recipe finds its file.
+is how the id-only `music` entry in the recipe finds its file. The subtitle is
+the checked-in `demo/galaxy_zh.srt`, so it resolves without any extra step.
 
 The recipe's second clip starts at **4.5 s**, not 4.2 s: the two clips overlap
 at 4.2 s, which the canonical contract rejects for a single picture track. That

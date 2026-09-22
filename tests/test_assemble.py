@@ -64,10 +64,16 @@ def skill(monkeypatch):
 
 @pytest.fixture
 def media_dir(tmp_path):
-    """A delivery root holding every file the shipped recipe references."""
+    """A delivery root holding every file the shipped recipe references.
+
+    That includes the subtitle file: the plan hands it to the host as a path,
+    so it is a referenced file exactly like the media is. Demo
+    ``fetch_assets.py`` stages it for the same reason.
+    """
     (tmp_path / "assets").mkdir()
     for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
         (tmp_path / "assets" / name).write_bytes(b"\x00")
+    (tmp_path / "galaxy_zh.srt").write_bytes(b"\x00")
     return tmp_path
 
 
@@ -167,6 +173,38 @@ def test_missing_media_blocks_dispatch_before_any_mutation(skill, recipe, tmp_pa
     assert skill.calls == []
 
 
+def test_a_missing_subtitle_file_fails_before_any_dispatch(skill, recipe, media_dir):
+    """The subtitle is a referenced file too.
+
+    A plan that names one resolves it against ``media_dir`` and hands the path
+    to the host, so it has to be checked with the media. Otherwise the run fails
+    at ``import_subtitles`` -- after the imports, the timeline and every clip
+    have already mutated the host.
+    """
+    (Path(media_dir) / "galaxy_zh.srt").unlink()
+
+    assert "does not contain every referenced file" in failed(
+        skill.main(recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir))
+    )
+    assert "galaxy_zh.srt" in failed(
+        skill.main(recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir))
+    )
+    assert skill.calls == []
+
+
+def test_dry_run_reports_every_referenced_file(skill, recipe, media_dir):
+    context = ok(
+        skill.main(recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir), dry_run=True)
+    )
+
+    assert context["script"]["referenced"] == [
+        "assets/earthrise.mp4",
+        "assets/oahu_flyover.mp4",
+        "assets/free_ambient.wav",
+        "galaxy_zh.srt",
+    ]
+
+
 def test_media_dir_is_required_unless_dry_run(skill, recipe):
     assert "media_dir is required" in failed(skill.main(recipe=recipe, media_index=MEDIA_INDEX))
 
@@ -191,6 +229,32 @@ def test_unknown_strategy_is_rejected(skill, recipe, media_dir):
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
+
+
+def test_marker_alone_does_not_trigger_a_fallback(skill, recipe, media_dir):
+    """Only a rejection naming *this* action means "not implemented".
+
+    A bare marker is a real failure: falling back would replay the whole plan as
+    a composed script over a timeline the batch action may already have partly
+    assembled, and the composed walk does not roll back.
+    """
+    for message in (
+        "unsupported action parameter: media_dir",
+        "unknown action field: media_dir",
+        "Unsupported action: add_clip",
+        "CapCut host API is unavailable",
+    ):
+        skill.calls.clear()
+
+        def handle(action, params, message=message):
+            raise RuntimeError(message)
+
+        skill.respond(handle)
+        assert message in failed(
+            skill.main(recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir))
+        ), message
+        # Never retried as a composed script: only the batch probe was attempted.
+        assert [action for action, _ in skill.calls] == ["apply_edit_plan"], message
 
 
 def test_host_batch_action_is_one_round_trip(skill, recipe, media_dir):

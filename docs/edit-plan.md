@@ -11,11 +11,17 @@ It is the contract behind three links that share it:
 | Assemble | `apply_edit_plan` (`capcut-assemble`) | yes | Plays the plan into a CapCut project. |
 
 All four validate against the same rules in
-`src/dcc_mcp_capcut/editplan.py`, so **a plan that compiles is a plan every
-link accepts**. That is the property this contract exists for: before it, the
-vlog recipe and the OTIO EDL applied different rules to the same media, and the
-shipped demo recipe had a 0.3 s overlap that one link accepted and the other
-rejected.
+`src/dcc_mcp_capcut/editplan.py`, so **a plan that compiles is a plan every link
+accepts** — with one stated exception: OTIO export additionally requires
+`media_duration` on every clip (rule 6), because the exporter refuses to write
+an `available_range` it cannot prove. Compile, import and assembly do not
+require it. That shared-rules property is what this contract exists for: before
+it, the vlog recipe and the OTIO EDL applied different rules to the same media,
+and the shipped demo recipe had a 0.3 s overlap that one link accepted and the
+other rejected.
+
+Assembly additionally requires every referenced file — clip media *and* the
+subtitle file — to exist under `media_dir`, checked before the first dispatch.
 
 Background and the spike that settled the assembly direction:
 [ADR 0002](adr/0002-canonical-edit-plan-and-assembly.md).

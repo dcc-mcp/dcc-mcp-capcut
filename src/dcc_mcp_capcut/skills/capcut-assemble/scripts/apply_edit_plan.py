@@ -28,6 +28,7 @@ from dcc_mcp_core.skill import skill_entry, skill_success
 from dcc_mcp_capcut.bridge import call_bridge
 from dcc_mcp_capcut.contracts import validate_host_result
 from dcc_mcp_capcut.editplan import (
+    CLIP_PLACEHOLDER,
     MEDIA_PLACEHOLDER,
     TIMELINE_PLACEHOLDER,
     compile_plan,
@@ -57,7 +58,7 @@ def _capture_ids(
         return {TIMELINE_PLACEHOLDER: str(timeline_id)} if timeline_id else {}
     if action == "add_clip" and step.get("clip_ref"):
         clip_id = result.get("clip_id")
-        return {f"$clip:{step['clip_ref']}": str(clip_id)} if clip_id else {}
+        return {f"{CLIP_PLACEHOLDER}{step['clip_ref']}": str(clip_id)} if clip_id else {}
     return {}
 
 
@@ -160,7 +161,7 @@ def main(
         try:
             result = _run_host(compiled, script, media_dir)
         except (RuntimeError, OSError) as error:
-            if strategy == "host" or not is_unsupported_action(error):
+            if strategy == "host" or not is_unsupported_action(error, "apply_edit_plan"):
                 raise
             result = None
             fallback_reason = str(error)

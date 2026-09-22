@@ -4,6 +4,7 @@ tools:
     input_schema:
       type: object
       additionalProperties: false
+      oneOf: [{required: [timeline]}, {required: [plan]}]
       properties:
         timeline:
           type: object

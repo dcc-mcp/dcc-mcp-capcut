@@ -109,7 +109,10 @@ script generation — is fully covered and host-free.
 - One call replaces a hand-orchestrated sequence, which is the structural fix
   for "the adapter can only add single features".
 - Assembly is validated host-free before the first mutation, so a bad plan
-  costs nothing but an error.
+  costs nothing but an error. "Every referenced file" covers the subtitle file
+  as well as clip media: it is handed to the host as a path, so it is checked
+  in the same pass rather than failing at `import_subtitles` once the timeline
+  has already been populated.
 - `dry_run` makes the whole edit inspectable before it is dispatched.
 
 ### Costs and limits
@@ -147,9 +150,12 @@ script generation — is fully covered and host-free.
    `capcut_panel/HOST_API.md` so a host can take it up; until then `auto`
    resolves to the composed walk.
 3. **Acceptance to run on a live host** (not yet done): with
-   `demo/output/free-travel-vlog.plan.json` and its assets, run
-   `apply_edit_plan` with `strategy="composed"` against a CapCut build whose
-   panel is connected, then confirm `verification.timeline` matches the plan's
-   `duration_frames` (375) and 3 clips, and that the saved project reopens
-   with the media online. Repeat with `strategy="host"` once a host
-   implements the batch action.
+   `demo/output/free-travel-vlog.plan.json`, run `apply_edit_plan` with
+   `strategy="composed"` and **`media_dir` set to `demo/`** against a CapCut
+   build whose panel is connected, then confirm `verification.timeline` matches
+   the plan's `duration_frames` (375) and 3 clips, and that the saved project
+   reopens with the media online. `demo/` is the delivery root: the plan's
+   portable paths are `assets/<media>` and `galaxy_zh.srt`, so
+   `media_dir=demo/assets/` resolves to `demo/assets/assets/<media>` and fails
+   before dispatch, naming the files it could not find. Repeat with
+   `strategy="host"` once a host implements the batch action.

@@ -46,11 +46,17 @@ as a project. A host that implements it should:
    cannot be, naming the steps it already applied.
 
 **A host that does not implement it must reject it as an unsupported action**, with
-a message containing `Unsupported action: apply_edit_plan` (the panel
-stringifies rejections, so the marker has to be in the text). That marker is
-the only signal that makes the adapter fall back to composing the plan from
-the individual actions above. Rejecting for any other reason is treated as a
-real failure and is never retried as a different edit.
+a message containing both the marker and the action name, e.g.
+`Unsupported action: apply_edit_plan` (the panel stringifies rejections, so the
+text has to carry both). The adapter's fallback requires **both**: the marker
+`unsupported action` (`unsupported_action` in a structured payload) *and* the
+name `apply_edit_plan`.
+
+That pairing is deliberate. A marker alone is too broad -- `unsupported action
+parameter`, or a rejection naming a *different* action, are real failures, and
+the adapter must not replay the plan as a composed script over a timeline the
+batch action may already have partly assembled. Rejecting for any other reason
+is treated as a real failure and is never retried as a different edit.
 
 The adapter's fallback walks the action script itself, so a host can adopt the
 batch action at its own pace; until then `auto` resolves to the composed path.

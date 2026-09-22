@@ -27,8 +27,10 @@ plan before you commit to it.
   `panel_connected: true`).
 - An exactly bound window: `DCC_MCP_CAPCUT_PID` and
   `DCC_MCP_CAPCUT_WINDOW_HANDLE` both set.
-- A `media_dir` containing **every** file the plan references, at the portable
-  relative paths the plan records. Missing media fails before any host mutation.
+- A `media_dir` containing **every** file the plan references — clip media *and*
+  the `subtitle` file, when the plan names one — at the portable relative paths
+  the plan records. Anything missing fails before any host mutation, so the
+  first live acceptance step is never the one that discovers a missing file.
 - `dry_run: true` needs none of the above: it is host-free.
 
 If any host-side prerequisite is unproven, run `capcut-setup` first.
@@ -71,7 +73,7 @@ error that triggers the fallback; everything else is a real failure.
 | Symptom | Meaning | Action |
 | --- | --- | --- |
 | `CapCut bridge did not respond; open the bundled panel` | No panel drained an action within 30 s. | Load the panel, confirm `/health` shows `panel_connected: true`, retry. |
-| `media_dir does not contain every referenced file: ...` | A plan path did not resolve. | Fix the relative paths or point `media_dir` at the delivery root. Nothing was dispatched. |
+| `media_dir does not contain every referenced file: ...` | A plan path did not resolve — clip media or the subtitle file. | Fix the relative paths or point `media_dir` at the delivery root. Nothing was dispatched. |
 | `track '...': clips overlap at frame N` | Two clips in one track overlap. | Move the later clip to a separate picture track; overlays are legal across tracks, never within one. |
 | `clip '...' exceeds media duration` | `source_in + duration` runs past `media_duration`. | Correct the trim or supply the true `media_duration`. |
 | `apply_edit_plan stopped at step N (<action>): ...` | The composed walk failed part-way. | Read `Steps already applied`; the host is **not** rolled back, so inspect the project before retrying. |
@@ -81,8 +83,9 @@ error that triggers the fallback; everything else is a real failure.
 
 ## Acceptance
 
-- `dry_run: true` returned the canonical plan, the media map, and the full
-  action script, and reported `dispatched: false`.
+- `dry_run: true` returned the canonical plan, the media map, `referenced` (every
+  file a dispatch will need, including the subtitle), and the full action
+  script, and reported `dispatched: false`.
 - Every referenced media file existed under `media_dir`, verified before the
   first dispatch.
 - The result reports `strategy` (`host` or `composed`), and when composed also

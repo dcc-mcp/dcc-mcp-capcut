@@ -264,6 +264,21 @@ def test_caption_bounds_are_checked(plan):
         normalize_plan(extended)
 
 
+def test_audio_level_is_bounded_like_the_host_tool_schema(recipe):
+    """set_audio_volume caps volume at 4; catch an out-of-range level at compile time."""
+    loud = json.loads(json.dumps(recipe))
+    loud["music"]["volume"] = 8
+
+    with pytest.raises(ValueError, match="music volume must be <= 4.0"):
+        compile_plan(loud, media_index=MEDIA_INDEX)
+
+    recipe["music"]["volume"] = 4.0
+    assert (
+        compile_plan(recipe, media_index=MEDIA_INDEX)["tracks"][1]["clips"][0]["audio"]["volume"]
+        == 4.0
+    )
+
+
 def test_media_path_rule_is_shared_with_the_otio_exporter(plan):
     """Traversal, absolute and URL forms fail on both links, not just one."""
     for bad in ("../a.mp4", "/a.mp4", "https://host/a.mp4", "media/%2e%2e/a.mp4"):
@@ -317,6 +332,8 @@ def test_plan_to_actions_is_deterministic_and_ordered(plan):
         "m1": "media/second.mp4",
         "m2": "media/bed.wav",
     }
+    # Captions go out as add_text steps, so there is no subtitle file here.
+    assert script["referenced"] == ["media/opening.mp4", "media/second.mp4", "media/bed.wav"]
     # One import per file: the host contract only guarantees a single
     # media_id per call, so a multi-path import could not be mapped back.
     assert [step["action"] for step in script["actions"]] == [
@@ -425,6 +442,40 @@ def test_media_dir_is_checked_before_any_dispatch(plan, tmp_path):
         plan_to_actions(plan, media_dir=str(tmp_path))
 
 
+def test_a_missing_subtitle_file_is_checked_with_the_media(recipe, tmp_path):
+    """The subtitle is handed to the host as a path, so it is a referenced file.
+
+    Checking it alongside the media is what keeps "every referenced file must
+    exist" true before the first dispatch, rather than failing at
+    ``import_subtitles`` once the timeline is already populated.
+    """
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+    (tmp_path / "assets").mkdir()
+    for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+        (tmp_path / "assets" / name).write_bytes(b"")
+
+    with pytest.raises(ValueError, match="does not contain every referenced file:") as caught:
+        plan_to_actions(plan, media_dir=str(tmp_path))
+    assert "galaxy_zh.srt" in str(caught.value)
+
+    (tmp_path / "galaxy_zh.srt").write_bytes(b"")
+    steps = plan_to_actions(plan, media_dir=str(tmp_path))["actions"]
+    assert [step for step in steps if step["action"] == "import_subtitles"][0]["params"][
+        "path"
+    ] == str(tmp_path / "galaxy_zh.srt")
+
+
+def test_referenced_lists_every_file_a_dispatch_needs(recipe):
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+
+    assert plan_to_actions(plan)["referenced"] == [
+        "assets/earthrise.mp4",
+        "assets/oahu_flyover.mp4",
+        "assets/free_ambient.wav",
+        "galaxy_zh.srt",
+    ]
+
+
 def test_export_step_requires_an_output_path(plan):
     with pytest.raises(ValueError, match="export=True requires output.path"):
         plan_to_actions(plan, export=True)
@@ -437,11 +488,28 @@ def test_export_step_requires_an_output_path(plan):
     assert steps[-2]["params"]["output_path"] == "out/vlog.mp4"
 
 
-def test_only_an_unsupported_action_marker_means_fall_back():
+def test_only_a_rejection_naming_this_action_means_fall_back():
+    """Both the marker and the action name are required.
+
+    A marker alone would turn an unrelated host error into a fallback that
+    replays the plan as a composed script over a timeline the batch action may
+    have already partly assembled.
+    """
     assert is_unsupported_action(RuntimeError("Unsupported action: apply_edit_plan"))
     assert is_unsupported_action(RuntimeError('{"unsupported_action": "apply_edit_plan"}'))
+
+    # Marker present, but not about this action -- or not a marker at all.
+    assert not is_unsupported_action(RuntimeError("unsupported action parameter: media_dir"))
+    assert not is_unsupported_action(RuntimeError("unknown action field: media_dir"))
+    assert not is_unsupported_action(RuntimeError("Unsupported action: add_clip"))
     assert not is_unsupported_action(RuntimeError("CapCut host API is unavailable"))
     assert not is_unsupported_action(RuntimeError("verification.ok was not true"))
+
+    # The check is scoped to the action being dispatched.
+    assert is_unsupported_action(RuntimeError("Unsupported action: add_clip"), "add_clip")
+    assert not is_unsupported_action(
+        RuntimeError("Unsupported action: add_clip"), "apply_edit_plan"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +570,30 @@ def test_otio_import_needs_the_interchange_extra(plan, monkeypatch):
 # ---------------------------------------------------------------------------
 # The demo consumes the same contract
 # ---------------------------------------------------------------------------
+
+
+def test_the_demo_resolves_against_demo_as_the_delivery_root(tmp_path):
+    """The documented hand-off must actually resolve.
+
+    The plan's portable paths are ``assets/<media>`` and ``galaxy_zh.srt``, so the
+    delivery root is ``demo/`` -- not ``demo/assets/``, which would look for
+    ``demo/assets/assets/...``. This guards the exact instruction the README and
+    ADR give for the live acceptance run.
+    """
+    plan = compile_plan(load_shipped_recipe(), media_index=MEDIA_INDEX)
+    root = tmp_path / "demo"
+    (root / "assets").mkdir(parents=True)
+    for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+        (root / "assets" / name).write_bytes(b"")
+    (root / "galaxy_zh.srt").write_bytes(b"")
+
+    steps = plan_to_actions(plan, media_dir=str(root))["actions"]
+    assert [step for step in steps if step["action"] == "import_subtitles"][0]["params"][
+        "path"
+    ] == str(root / "galaxy_zh.srt")
+
+    with pytest.raises(ValueError, match="does not contain every referenced file"):
+        plan_to_actions(plan, media_dir=str(root / "assets"))
 
 
 def test_shipped_demo_assets_declare_their_local_paths():

@@ -93,7 +93,9 @@ python -m dcc_mcp_capcut.interchange --input edit.json --output timeline.otio
 ## Acceptance
 
 - `compile_edit_plan` returned `schema: dcc-mcp-capcut/edit-plan/v1` and the
-  same document exports and assembles without a second verdict.
+  same document assembles without a second verdict. For OTIO export it also
+  needs `media_duration` on every clip: the exporter will not claim an
+  `available_range` it cannot prove.
 - The call returned `otio_json` plus `duration_frames`, `fps`, `clip_count`, and
   `media_paths`, and no exception was raised.
 - `media_paths` is a complete list of portable relative paths, and every one of

@@ -78,12 +78,113 @@ jobs:
           python -m twine check dist/*
       - name: Build deterministic panel artifact
         run: python tools/build_panel_archive.py --version 0.1.0 --output dist/dcc-mcp-capcut-0.1.0-panel.zip
+      - name: Verify the panel artifact against its manifest
+        run: python tools/build_panel_archive.py --verify dist/dcc-mcp-capcut-0.1.0-panel.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-candidate
           path: dist/*
           if-no-files-found: error
           retention-days: 7
+
+  core-floor:
+    name: dcc-mcp-core ${{ matrix.core }} (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Both supported floors are green, so they gate the merge: a regression on
+    # either one must fail the build. The 0.19.13 entry stays report-only on
+    # purpose -- that version does not exist on PyPI, so the lane documents the
+    # phantom floor it replaced rather than testing a supported combination.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - core: "0.20.21"
+            label: CI-verified
+            experimental: false
+          - core: "0.19.90"
+            label: declared floor (lowest usable)
+            experimental: false
+          - core: "0.19.13"
+            label: phantom floor, absent from PyPI
+            experimental: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Resolve the pin
+        id: pin
+        shell: bash
+        run: |
+          printf 'dcc-mcp-core==%s\n' "${{ matrix.core }}" > "$RUNNER_TEMP/core-pin.txt"
+          if python -m pip install --disable-pip-version-check --dry-run \
+              -c "$RUNNER_TEMP/core-pin.txt" 'dcc-mcp-core'; then
+            echo "resolvable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolvable=false" >> "$GITHUB_OUTPUT"
+            if [[ "${{ matrix.experimental }}" == "true" ]]; then
+              # Report-only lane: the unresolvable pin IS the finding this lane
+              # exists to publish, so it must not fail the build.
+              echo "::warning::dcc-mcp-core==${{ matrix.core }} cannot be resolved from PyPI; the declared floor may not exist."
+            else
+              # A supported floor that stops resolving is the exact regression
+              # this job exists to catch, so it has to fail the build rather
+              # than leave an annotation nobody reads.
+              echo "::error::dcc-mcp-core==${{ matrix.core }} cannot be resolved from PyPI; a supported floor must stay installable."
+              exit 1
+            fi
+          fi
+      - name: Install
+        id: install
+        if: steps.pin.outputs.resolvable == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -c "$RUNNER_TEMP/core-pin.txt" -e ".[dev]"
+          python -c "import importlib.metadata as m; print('dcc-mcp-core', m.version('dcc_mcp_core'))"
+      - name: Test
+        id: test
+        # Only meaningful on an environment that actually installed the pin; a
+        # skipped or failed install must not be read as a test result.
+        if: steps.install.outcome == 'success'
+        run: python -m pytest -q
+      - name: Record the floor verdict
+        if: always()
+        shell: bash
+        run: |
+          resolvable="${{ steps.pin.outputs.resolvable }}"
+          install="${{ steps.install.outcome }}"
+          suite="${{ steps.test.outcome }}"
+          # Keep the three failure modes apart: a version that does not exist on
+          # PyPI is a different fact from one this runner cannot install, and
+          # only the third says the adapter itself is broken on that version.
+          if [[ "$resolvable" == "false" ]]; then
+            verdict="NOT RESOLVABLE (no such version on PyPI)"
+          elif [[ "$install" == "failure" ]]; then
+            verdict="NOT INSTALLABLE (dependency or platform conflict)"
+          elif [[ "$suite" == "success" ]]; then
+            verdict="USABLE"
+          elif [[ "$suite" == "failure" ]]; then
+            verdict="NOT USABLE"
+          else
+            verdict="NOT RUN (resolvable=$resolvable install=$install test=$suite)"
+          fi
+          {
+            echo "### dcc-mcp-core ${{ matrix.core }} — $verdict"
+            echo ""
+            echo "- Label: ${{ matrix.label }}"
+            echo "- Resolution: \`resolvable=$resolvable\`"
+            echo "- Install step: \`$install\`"
+            echo "- Test suite: \`$suite\`"
+            echo "- Gate: $([[ "${{ matrix.experimental }}" == "true" ]] && echo 'reported only (continue-on-error)' || echo 'blocking')"
+            echo "- Declared floor in \`pyproject.toml\`: \`dcc-mcp-core>=0.19.90,<1.0.0>\`"
+            echo ""
+            echo "A \`NOT USABLE\` verdict on a floor entry is the evidence to raise"
+            echo "the declared floor; it must not be silenced by relaxing this job. A"
+            echo "\`NOT INSTALLABLE\` verdict means this runner could not install the"
+            echo "pin and says nothing about adapter compatibility with it."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   skill-contract:
     name: Bundled Skill contract

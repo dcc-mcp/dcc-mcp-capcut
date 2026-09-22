@@ -55,6 +55,8 @@ jobs:
           python tools/build_panel_archive.py \
             --version "$version" \
             --output "dist/dcc-mcp-capcut-${version}-panel.zip"
+          python tools/build_panel_archive.py \
+            --verify "dist/dcc-mcp-capcut-${version}-panel.zip"
           find dist -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
       - name: Attach artifacts to Release Please release
         shell: bash

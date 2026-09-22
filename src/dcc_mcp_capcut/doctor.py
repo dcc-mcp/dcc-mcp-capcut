@@ -59,7 +59,7 @@ EXIT_OK = 0
 EXIT_FAILED = 1
 
 MIN_PYTHON = (3, 9)
-MIN_CORE_VERSION = "0.19.13"
+MIN_CORE_VERSION = "0.19.90"
 DEFAULT_BRIDGE_PORT = 47410
 DEFAULT_BRIDGE_TOKEN = "dev-token"
 PANEL_DIR = Path(__file__).resolve().parent / "capcut_panel"
@@ -175,12 +175,15 @@ def check_core() -> Check:
         return Check(
             "dcc_mcp_core",
             FAIL,
-            f"dcc_mcp_core {installed} is older than the verified floor {MIN_CORE_VERSION}",
+            f"dcc_mcp_core {installed} is older than the declared install floor {MIN_CORE_VERSION}",
             detail,
             hint=f"pip install --upgrade '{requirement}'",
         )
     return Check(
-        "dcc_mcp_core", OK, f"dcc_mcp_core {installed} satisfies the verified floor", detail
+        "dcc_mcp_core",
+        OK,
+        f"dcc_mcp_core {installed} satisfies the declared install floor",
+        detail,
     )
 
 

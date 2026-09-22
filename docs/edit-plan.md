@@ -20,7 +20,7 @@ it, the vlog recipe and the OTIO EDL applied different rules to the same media,
 and the shipped demo recipe had a 0.3 s overlap that one link accepted and the
 other rejected.
 
-Assembly additionally requires every referenced file — clip media *and* the
+Assembly additionally requires every referenced file — clip media *and* every
 subtitle file — to exist under `media_dir`, checked before the first dispatch.
 
 Background and the spike that settled the assembly direction:
@@ -79,7 +79,10 @@ Background and the spike that settled the assembly direction:
     {"text": "抬头看，银河系就在我们身边", "start": 18, "duration": 51,
      "style": {"font": "Microsoft YaHei", "size": 48, "weight": 700, "color": "#FFFFFF"}}
   ],
-  "subtitle": {"file": "galaxy_zh.srt", "format": "srt"},
+  "subtitles": [
+    {"file": "galaxy_zh.srt", "format": "srt", "language": "zh-CN"},
+    {"file": "galaxy_en.srt", "format": "srt", "language": "en-US"}
+  ],
   "output": {"path": "./output/free-travel-vlog.mp4", "aspect_ratio": "9:16"}
 }
 ```
@@ -94,8 +97,8 @@ Background and the spike that settled the assembly direction:
 | `width` / `height` | yes | Canvas, in pixels. Advisory for editors, authoritative for assembly. |
 | `duration_frames` | no | Defaults to the end of the last clip or caption. |
 | `tracks` | yes | Non-empty. Ordered bottom to top, as in OTIO. |
-| `captions` | no | Inline captions; ignored by assembly when `subtitle` is present. |
-| `subtitle` | no | An SRT/LRC/ASS file to import as an editable text track. |
+| `captions` | no | Inline captions; ignored by assembly when `subtitles` is non-empty. |
+| `subtitles` | no | SRT/LRC/ASS files to import as editable text tracks, one track each. |
 | `output` | no | Delivery path and aspect ratio. |
 
 Track: `name`, `kind` (`Video` or `Audio`), `clips`.
@@ -104,6 +107,11 @@ Clip: `name`, `media`, `start`, `duration`, optional `source_in` (default 0),
 `media_duration`, and optional advisory `audio`.
 
 Caption: `text`, `start`, `duration`, optional advisory `style`.
+
+Subtitle: `file`, optional `format`, `offset`, `language`, `style`, `align` and
+`output_path`. `subtitle` (a single object) is accepted as an alias for a
+one-element `subtitles` list; the canonical document always carries the list,
+and supplying both is an error rather than a union.
 
 ## Units
 
@@ -152,8 +160,24 @@ document as the authoritative copy.
 | `audio.volume` | `set_audio_volume` | dropped |
 | `audio.fade_in` / `fade_out` | `add_audio_fade` | dropped |
 | caption `style` | `add_text(style=...)` | dropped |
-| `subtitle` | `import_subtitles` | dropped |
+| `subtitles` | one `import_subtitles` per entry | dropped |
 | `output` | `export_video` (with `export: true`) | dropped |
+
+### Subtitle alignment
+
+`align` decides how a file's timecodes map onto the timeline, and the adapter
+resolves it **before dispatch** rather than delegating to the host, so the
+verdict is the same on every host build.
+
+| `align` | Behaviour |
+| --- | --- |
+| `timecode` (default) | Honour the file's own clock, shifted by `offset`. The file is handed to the host as-is. |
+| `sequence` | Discard the absolute timecodes and pack the cues back to back from `offset`, each keeping its own duration clamped to 0.2-5 s. The re-timed SRT is written to `output_path` and imported. Requires `output_path`. |
+
+`align` and `output_path` are adapter-side directives and are stripped before
+the call reaches the host. `output_path` resolves against `media_dir` like
+the input paths do, but is a write target: it is never required to exist and
+is never added to `referenced`.
 
 ## The vlog recipe profile
 
@@ -186,6 +210,9 @@ Recipe-only conveniences, resolved during compilation:
   (in the demo, built from `demo/assets.json`).
 - A music bed without an explicit `duration` spans the cut. The cut length
   comes from the picture and captions alone, so the bed never defines it.
+- `subtitle_files` is the plural form: a list of paths or objects, compiling to
+  the canonical `subtitles` list. It is mutually exclusive with
+  `subtitle_file`, for the same reason the two canonical forms are.
 
 ## Assembly
 
@@ -197,7 +224,7 @@ import_media   × one per referenced file
 create_timeline
 add_clip       × one per clip, ordered by track then start
 set_audio_volume / add_audio_fade   (only for clips carrying advisory audio)
-import_subtitles  — or —  add_text × one per caption
+import_subtitles × one per subtitle file  — or —  add_text × one per caption
 export_video   (only with export: true)
 save_project
 ```

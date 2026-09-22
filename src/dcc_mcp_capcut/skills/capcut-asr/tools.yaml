@@ -1,0 +1,42 @@
+tools:
+  - name: transcribe
+    description: Transcribe audio or video through the user's own external ASR executor. Ships no model; requires DCC_MCP_CAPCUT_ASR_EXECUTOR to be set.
+    input_schema:
+      type: object
+      required: [media]
+      properties:
+        media:
+          type: string
+          minLength: 1
+          description: Path to the media file to transcribe.
+        language:
+          type: string
+          description: Language hint forwarded to the executor as --language, for example zh-CN or en-US.
+        output_format:
+          type: string
+          enum: [srt, json]
+          default: srt
+          description: "What the executor is asked to emit on stdout. srt is subtitle text; json is an object with 'segments' (start, end, text) and an optional 'language'."
+        timeout:
+          type: number
+          exclusiveMinimum: 0
+          description: Seconds the executor may run. Defaults to DCC_MCP_CAPCUT_ASR_TIMEOUT, then 600.
+        output_path:
+          type: string
+          minLength: 1
+          description: Optional path to write the resulting SRT to, for feeding straight into import_subtitles.
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          description: When supplied, also return the transcript as canonical plan captions in integer frames at this rate.
+        executor:
+          type: string
+          minLength: 1
+          description: Override DCC_MCP_CAPCUT_ASR_EXECUTOR for this call only.
+    read_only: false
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 900
+    source_file: scripts/transcribe.py

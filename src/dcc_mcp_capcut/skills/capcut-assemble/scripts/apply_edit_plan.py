@@ -36,6 +36,7 @@ from dcc_mcp_capcut.editplan import (
     plan_to_actions,
     substitute_placeholders,
 )
+from dcc_mcp_capcut.subtitles import prepare_import_params
 
 
 def _capture_ids(
@@ -60,6 +61,21 @@ def _capture_ids(
         clip_id = result.get("clip_id")
         return {f"{CLIP_PLACEHOLDER}{step['clip_ref']}": str(clip_id)} if clip_id else {}
     return {}
+
+
+def _resolve_subtitle_alignment(script: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite every ``import_subtitles`` step so the directives are gone.
+
+    Called once, before the strategy is chosen, so the host batch action and the
+    composed walk dispatch the *same* rewritten file. Resolving it only on the
+    composed path would leak ``align`` to a host that implements the batch
+    action -- and ``auto`` tries that host first, so a permissive one would
+    import the unaligned source and report success.
+    """
+    for step in script["actions"]:
+        if step["action"] == "import_subtitles":
+            step["params"] = prepare_import_params(step["params"])
+    return script
 
 
 def _run_composed(script: dict[str, Any]) -> dict[str, Any]:
@@ -165,6 +181,15 @@ def main(
             "media_dir is required unless dry_run is true: the plan stores portable "
             "relative media paths and they must resolve to real files before dispatch"
         )
+
+    # Resolve alignment once, for both strategies. It happens after the dry run
+    # because resolving it writes a file, and a dry run promises to touch
+    # nothing; and before the strategy is chosen so the host batch action never
+    # sees a directive it would either reject or silently ignore.
+    script = _resolve_subtitle_alignment(script)
+    for subtitle in compiled.get("subtitles", []):
+        subtitle.pop("align", None)
+        subtitle.pop("output_path", None)
 
     fallback_reason = None
     if strategy in ("auto", "host"):

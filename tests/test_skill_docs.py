@@ -22,7 +22,9 @@ SKILL_DIRS = sorted(path for path in SKILLS.glob("capcut-*") if path.is_dir())
 
 # Host-backed skills dispatch through the loopback bridge, so their bodies must
 # document the panel-timeout failure mode. These two deliberately do not.
-NON_BRIDGE_SKILLS = {"capcut-interchange", "capcut-native"}
+# ``capcut-asr`` runs a user-named executor rather than dispatching through the
+# bridge, so it has no panel to time out on.
+NON_BRIDGE_SKILLS = {"capcut-asr", "capcut-interchange", "capcut-native"}
 
 REQUIRED_SECTIONS = ("## Prerequisites", "## Failure recovery", "## Acceptance", "## Boundaries")
 
@@ -49,6 +51,7 @@ def parse_frontmatter(path: Path) -> tuple[dict, str]:
 def test_every_skill_directory_was_discovered():
     assert [path.name for path in SKILL_DIRS] == [
         "capcut-ai",
+        "capcut-asr",
         "capcut-assemble",
         "capcut-audio",
         "capcut-effects",

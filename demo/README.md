@@ -10,8 +10,9 @@ python demo/render_vlog.py
 ```
 
 The rendered proof is written to `demo/output/free-travel-vlog.mp4` with a
-SHA-256 receipt beside it. The Chinese caption track is also available as
-`demo/galaxy_zh.srt` for direct CapCut subtitle import.
+SHA-256 receipt beside it. The caption tracks are also checked in as
+`demo/galaxy_zh.srt` and `demo/galaxy_en.srt` for direct CapCut subtitle
+import.
 
 ## One plan, three paths
 
@@ -38,6 +39,36 @@ dispatch, naming the files it could not find.
 Asset ids resolve to local paths through `local_path` in `assets.json`, which
 is how the id-only `music` entry in the recipe finds its file. The subtitle is
 the checked-in `demo/galaxy_zh.srt`, so it resolves without any extra step.
+
+## Two languages, one plan
+
+The recipe names a single subtitle file, so it compiles to a one-element
+`subtitles` list. Multi-language delivery is the plural form — pass a plan
+carrying both files and every link accepts it:
+
+```json
+{
+  "subtitles": [
+    {"file": "galaxy_zh.srt", "format": "srt", "language": "zh-CN"},
+    {"file": "galaxy_en.srt", "format": "srt", "language": "en-US"}
+  ]
+}
+```
+
+`apply_edit_plan` emits one `import_subtitles` step per entry, so each language
+lands on its own editable text track. `dry_run: true` lists both files under
+`referenced` and checks that both exist under `media_dir` before anything is
+dispatched.
+
+The equivalent recipe form is `subtitle_files`, which takes paths or objects:
+
+```json
+{"subtitle_files": ["galaxy_zh.srt", {"file": "galaxy_en.srt", "language": "en-US"}]}
+```
+
+It is mutually exclusive with `subtitle_file`, for the same reason the two
+canonical forms are: a document that expressed both would be a union the author
+did not write.
 
 The recipe's second clip starts at **4.5 s**, not 4.2 s: the two clips overlap
 at 4.2 s, which the canonical contract rejects for a single picture track. That

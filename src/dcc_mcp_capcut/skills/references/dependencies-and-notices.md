@@ -15,11 +15,29 @@ from an older release.
 
 | Dependency | Pin | License | Distributed in this wheel? |
 | --- | --- | --- | --- |
-| `dcc-mcp-core` | `>=0.19.13,<1.0.0`; doctor floor `0.19.13` | MIT | No — resolved from PyPI at install time |
+| `dcc-mcp-core` | `>=0.19.13,<1.0.0`; doctor floor `0.19.13`; CI-verified `0.20.21` (see below) | MIT | No — resolved from PyPI at install time |
 | `opentimelineio` | `>=0.16,<1` (optional extra `interchange`) | Apache-2.0 | No — optional extra, resolved from PyPI |
 
 Neither dependency is vendored or modified here. Their licenses apply to the
 packages you install, and only to those packages.
+
+### `dcc-mcp-core` floor versus CI-verified version
+
+The declared install floor and the combination CI actually exercises are not the
+same number, and the gap is deliberate while the evidence is collected:
+
+| Fact | Value | Where it is enforced |
+| --- | --- | --- |
+| Declared install floor | `>=0.19.13,<1.0.0` | `pyproject.toml`, mirrored by the doctor's `MIN_CORE_VERSION` |
+| Lowest version that floor resolves to | `0.19.45` | PyPI; no `0.19.13` release exists, so the floor is not installable as written |
+| CI-verified combination | `0.20.21` | `core-floor` job in `.github/workflows/ci.yml`, plus `dcc-mcp-cli v0.20.21` in the `skill-contract` lint job |
+| Skill-declared compatibility | `dcc-mcp-core 0.20.21+` | `compatibility` in each `capcut-*/SKILL.md` frontmatter |
+
+The `core-floor` job reports each version as `USABLE`, `NOT USABLE`, or
+`NOT INSTALLABLE` in its job summary. Treat a `NOT USABLE` floor entry as the
+evidence for raising the declared floor; do not close the gap by relaxing that
+job. Until the floor moves, a version between `0.19.13` and `0.20.21` is
+permitted by the install constraint but is not a verified combination.
 
 ## Native and external run-time dependencies (not bundled)
 

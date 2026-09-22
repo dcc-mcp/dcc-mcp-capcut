@@ -75,6 +75,14 @@ Python runtime. Before publishing such a bundle, record its SHA-256, architectur
 compiler ABI, Qt version, probe protocol and exact host-build acceptance evidence.
 This change supplies source and build tests, not a production native release.
 
+When that bundle is produced, reuse the release-archive manifest convention
+instead of inventing a second one: `tools/build_panel_archive.py` writes a
+`manifest.json` with a `files_sha256` digest per archive member and an optional
+`host_acceptance` object, and `python tools/build_panel_archive.py --verify
+<archive>` fails when any member is missing, unrecorded, or altered. Record the
+architecture, compiler ABI, Qt version, probe protocol and host-build evidence
+as the `host_acceptance` payload so the same verifier checks it.
+
 ## Windows CapCut acceptance
 
 CapCut 9.4.0.4015 / Qt 6.2.2 loaded the testability library through a DCC-CUA

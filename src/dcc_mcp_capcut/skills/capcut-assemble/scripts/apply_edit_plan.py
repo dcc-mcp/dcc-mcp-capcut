@@ -36,6 +36,7 @@ from dcc_mcp_capcut.editplan import (
     plan_to_actions,
     substitute_placeholders,
 )
+from dcc_mcp_capcut.subtitles import prepare_import_params
 
 
 def _capture_ids(
@@ -72,6 +73,12 @@ def _run_composed(script: dict[str, Any]) -> dict[str, Any]:
     for step in script["actions"]:
         action = step["action"]
         params = substitute_placeholders(step["params"], ids)
+        if action == "import_subtitles":
+            # `align` is an adapter-side directive, so it is resolved here --
+            # into a real file on disk -- rather than forwarded to a host that
+            # may ignore it. Doing this in the composed walk is what makes a
+            # plan's alignment mean the same thing on every host build.
+            params = prepare_import_params(params)
         try:
             result = validate_host_result(action, call_bridge(action, params))
         except (RuntimeError, OSError) as error:

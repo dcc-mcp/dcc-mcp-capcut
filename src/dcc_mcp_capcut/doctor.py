@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from .__version__ import __version__
+from .asr import ASR_EXECUTOR_ENV, AsrError, configured_executor, resolve_executor
 from .bootstrap import CapCutBindingError, select_capcut_window
 from .hosts import get_provider
 from .installer import verify_installation
@@ -505,6 +506,48 @@ def check_opentimelineio() -> Check:
     )
 
 
+def check_asr_executor() -> Check:
+    """Report whether the external ASR seam has anything to call.
+
+    Transcription is optional, so a missing executor is a ``warn``, never a
+    ``fail``: the adapter starts and every other capability works, and only
+    ``capcut-asr`` is unavailable. The message still names the variable and
+    says plainly that the adapter ships no model, because "no ASR configured"
+    is a state a user has to be able to recognise and act on -- silently
+    returning an empty transcript would be far worse.
+    """
+    configured = configured_executor()
+    if configured is None:
+        return Check(
+            "asr_executor",
+            WARN,
+            f"no ASR executor configured ({ASR_EXECUTOR_ENV} is unset); "
+            "transcription is unavailable",
+            {"configured": False, "env": ASR_EXECUTOR_ENV, "usable": False},
+            hint=(
+                f"Set {ASR_EXECUTOR_ENV} to your own transcribe script if you need "
+                "captions from audio. The adapter ships no ASR model and downloads "
+                "no weights, so the choice of engine is yours; see docs/asr-executor.md."
+            ),
+        )
+    try:
+        executor = resolve_executor()
+    except AsrError as error:
+        return Check(
+            "asr_executor",
+            WARN,
+            str(error),
+            {"configured": True, "path": configured, "usable": False},
+            hint=f"Point {ASR_EXECUTOR_ENV} at a runnable transcribe script; see docs/asr-executor.md.",
+        )
+    return Check(
+        "asr_executor",
+        OK,
+        f"ASR executor configured: {executor}",
+        {"configured": True, "path": str(executor), "usable": True},
+    )
+
+
 CHECKS: tuple[tuple[str, Callable[[], Check]], ...] = (
     ("python", check_python),
     ("dcc_mcp_core", check_core),
@@ -516,6 +559,7 @@ CHECKS: tuple[tuple[str, Callable[[], Check]], ...] = (
     ("panel_files", check_panel_files),
     ("qt_probe", check_qt_probe),
     ("opentimelineio", check_opentimelineio),
+    ("asr_executor", check_asr_executor),
 )
 
 
@@ -637,6 +681,7 @@ __all__ = [
     "CHECKS",
     "Check",
     "Report",
+    "check_asr_executor",
     "main",
     "render_report",
     "run_checks",

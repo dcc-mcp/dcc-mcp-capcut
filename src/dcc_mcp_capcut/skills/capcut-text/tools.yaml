@@ -37,7 +37,7 @@ tools:
     timeout_hint_secs: 300
     source_file: scripts/auto_captions.py
   - name: import_subtitles
-    description: Import SRT, LRC, or ASS subtitles and apply them as an editable timeline text track.
+    description: Import SRT, LRC, or ASS subtitles and apply them as an editable timeline text track. align selects how the file's timecodes map to the timeline and is resolved by the adapter before dispatch.
     input_schema:
       type: object
       required: [path]
@@ -48,9 +48,40 @@ tools:
         offset: {type: number, default: 0}
         language: {type: string, default: zh-CN}
         style: {type: object}
+        align: {type: string, enum: [timecode, sequence], default: timecode}
+        output_path: {type: string, minLength: 1, description: Where a re-timed file is written when align is sequence. Defaults to a sibling .aligned.srt file.}
     read_only: false
     destructive: true
     idempotent: false
     execution: sync
     affinity: any
     source_file: scripts/import_subtitles.py
+  - name: import_subtitles_batch
+    description: Import several subtitle files in one call, one editable text track each; for multi-language or multi-section delivery. Reports per-file results and stops at the first failure without rolling back.
+    input_schema:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          description: One entry per subtitle file, each becoming its own text track.
+          items:
+            type: object
+            required: [path]
+            properties:
+              path: {type: string, minLength: 1}
+              format: {type: string, enum: [srt, lrc, ass]}
+              offset: {type: number, default: 0}
+              language: {type: string}
+              style: {type: object}
+              align: {type: string, enum: [timecode, sequence], default: timecode}
+              output_path: {type: string, minLength: 1}
+        timeline_id: {type: string}
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 300
+    source_file: scripts/import_subtitles_batch.py

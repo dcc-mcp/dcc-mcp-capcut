@@ -14,7 +14,7 @@ lands at the checkout root can find the real content. It is not the authoritativ
 description of any CapCut capability.
 
 - **Authoritative content lives inside the package**, in
-  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 12 files ship in the
+  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 13 files ship in the
   wheel, which is what an agent actually consumes.
 - **This file is not in the lint loop.** CI validates
   `src/dcc_mcp_capcut/skills/capcut-*` with `dcc-mcp-cli lint --warnings-as-errors`
@@ -22,11 +22,12 @@ description of any CapCut capability.
   unmaintained second source of truth that no check reads.
 - CapCut Desktop has no stable public Python API. Every capability below that
   drives the host runs through a typed, token-authenticated loopback bridge and
-  the bundled CapCut-side panel, and therefore needs `capcut-setup` first. Two
-  skills are exempt: `capcut-interchange` runs host-free from supplied edit
-  decisions, and `capcut-native` talks to the optional Qt probe endpoint instead
-  of the bridge and panel (it still needs the bound host PID). Do not run
-  `capcut-setup`, and do not reject a call, for those two.
+  the bundled CapCut-side panel, and therefore needs `capcut-setup` first.
+  Three skills are exempt: `capcut-interchange` runs host-free from supplied
+  edit decisions, `capcut-asr` runs host-free and calls an ASR executor you
+  supply (never the bridge), and `capcut-native` talks to the optional Qt probe
+  endpoint instead of the bridge and panel (it still needs the bound host PID).
+  Do not run `capcut-setup`, and do not reject a call, for those three.
   See `src/dcc_mcp_capcut/skills/references/host-boundary.md`.
 
 ## Skill index
@@ -43,6 +44,7 @@ description of any CapCut capability.
 | `capcut-effects` | Effects and color adjustment. |
 | `capcut-ai` | Optional host-side background removal and stabilization. |
 | `capcut-export` | Render, monitor, cancel, thumbnail, and the vlog recipe. |
+| `capcut-asr` | Transcription through an ASR executor **you** supply; the adapter ships no model. No host required. |
 | `capcut-interchange` | Canonical edit plan: compile, portable OpenTimelineIO export and import. No host required. |
 | `capcut-native` | Optional read-only Qt metadata probe. Diagnostics only. |
 

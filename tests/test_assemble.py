@@ -464,3 +464,57 @@ def test_a_walk_that_proves_nothing_is_a_failure(skill):
 
     with pytest.raises(RuntimeError, match="no step returned a timeline readback"):
         skill._run_composed(script)
+
+
+# ---------------------------------------------------------------------------
+# Subtitle alignment through the composed walk
+# ---------------------------------------------------------------------------
+
+
+def test_the_composed_walk_resolves_sequence_alignment_before_dispatch(skill, media_dir):
+    """`align` is an adapter directive, so it never reaches the host -- the walk
+    re-times the file itself and imports the rewritten one."""
+    subtitle = (
+        "1\n00:00:00,600 --> 00:00:02,300\nfirst\n\n2\n00:00:03,000 --> 00:00:05,000\nsecond\n"
+    )
+    (media_dir / "galaxy_zh.srt").write_text(subtitle, encoding="utf-8")
+    recipe = json.loads((ROOT / "demo" / "vlog_recipe.json").read_text(encoding="utf-8"))
+    recipe.pop("captions", None)
+    recipe["subtitle_file"] = "./galaxy_zh.srt"
+    recipe["subtitle_files"] = [
+        {"file": "galaxy_zh.srt", "align": "sequence", "output_path": "out/galaxy.aligned.srt"}
+    ]
+    recipe.pop("subtitle_file")
+    composed_host(skill)
+
+    context = ok(
+        skill.main(
+            recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir), strategy="composed"
+        )
+    )
+
+    assert context["strategy"] == "composed"
+    imports = [params for action, params in skill.calls if action == "import_subtitles"]
+    assert len(imports) == 1
+    # The host got the rewritten file, and no adapter-side directives.
+    assert imports[0]["path"] == str(media_dir / "out" / "galaxy.aligned.srt")
+    assert "align" not in imports[0]
+    assert "output_path" not in imports[0]
+    rewritten = (media_dir / "out" / "galaxy.aligned.srt").read_text(encoding="utf-8")
+    assert "00:00:00,000 --> 00:00:01,700" in rewritten
+
+
+def test_the_composed_walk_leaves_a_timecode_subtitle_untouched(skill, recipe, media_dir):
+    """The default path must stay exactly what it was before `align` existed."""
+    composed_host(skill)
+
+    ok(
+        skill.main(
+            recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir), strategy="composed"
+        )
+    )
+
+    imports = [params for action, params in skill.calls if action == "import_subtitles"]
+    assert imports[0]["path"] == str(media_dir / "galaxy_zh.srt")
+    # Nothing was written next to the delivery root's files.
+    assert sorted(path.name for path in media_dir.iterdir()) == ["assets", "galaxy_zh.srt"]

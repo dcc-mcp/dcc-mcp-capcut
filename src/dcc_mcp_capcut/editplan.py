@@ -35,8 +35,11 @@ import json
 import math
 import posixpath
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
+
+from .subtitles import ALIGNMENTS, Cue
+from .subtitles import TIMECODE as ALIGN_TIMECODE
 
 PLAN_SCHEMA = "dcc-mcp-capcut/edit-plan/v1"
 VLOG_RECIPE_SCHEMA = "capcut-vlog-recipe/v1"
@@ -208,13 +211,22 @@ _PLAN_FIELDS = {
     "tracks",
     "captions",
     "subtitle",
+    "subtitles",
     "output",
+}
+_SUBTITLE_FIELDS = {
+    "file",
+    "format",
+    "offset",
+    "language",
+    "style",
+    "align",
+    "output_path",
 }
 _TRACK_FIELDS = {"name", "kind", "clips"}
 _CLIP_FIELDS = {"name", "media", "start", "source_in", "duration", "media_duration", "audio"}
 _AUDIO_FIELDS = {"volume", "fade_in", "fade_out"}
 _CAPTION_FIELDS = {"text", "start", "duration", "style"}
-_SUBTITLE_FIELDS = {"file", "format", "offset", "language", "style"}
 _OUTPUT_FIELDS = {"path", "aspect_ratio"}
 
 
@@ -252,6 +264,107 @@ def _validate_clip(spec: Any, track_name: str, index: int) -> dict:
             if value is not None
         }
     return clip
+
+
+def _validate_subtitle(spec: Any, index: int) -> dict[str, Any]:
+    """Validate one subtitle track entry and return it in canonical form.
+
+    ``align`` and ``output_path`` are adapter-side directives, never host
+    parameters: ``align`` only takes effect when the adapter resolves it
+    offline before dispatch, and it needs ``output_path`` to say where the
+    re-timed file goes. Requiring that pair at compile time is what keeps the
+    plan host-free -- a plan cannot silently pick a write location.
+    """
+    label = f"subtitle {index}"
+    require_object(spec, _SUBTITLE_FIELDS, {"file"}, label)
+    fmt = spec.get("format")
+    if fmt is not None and fmt not in SUBTITLE_FORMATS:
+        raise ValueError(f"subtitle format must be one of {list(SUBTITLE_FORMATS)}")
+
+    align = spec.get("align", ALIGN_TIMECODE)
+    if align not in ALIGNMENTS:
+        raise ValueError(f"{label} align must be one of {list(ALIGNMENTS)}, not {align!r}")
+    if align != ALIGN_TIMECODE and not spec.get("output_path"):
+        raise ValueError(
+            f"{label} align={align!r} requires output_path: the plan is host-free and "
+            "cannot choose where to write the re-timed file"
+        )
+
+    subtitle = {
+        # Same portable-path rule as clip media, enforced on this entry point
+        # too. An absolute path would be resolved by pathlib as-is and escape
+        # media_dir entirely, which would defeat the delivery-root check and
+        # make the plan non-relocatable -- and the recipe entry point would
+        # reject the very same value.
+        "file": relative_media(spec["file"]),
+        **{
+            key: value
+            for key, value in (
+                ("format", fmt),
+                ("offset", _optional_number(spec.get("offset"), f"{label} offset")),
+                ("language", spec.get("language")),
+                ("style", spec.get("style")),
+                ("align", align if align != ALIGN_TIMECODE else None),
+                ("output_path", spec.get("output_path")),
+            )
+            if value is not None
+        },
+    }
+    if "language" in subtitle:
+        require_text(subtitle["language"], f"{label} language")
+    if "style" in subtitle and not isinstance(subtitle["style"], dict):
+        raise ValueError(f"{label} style must be an object")
+    if "output_path" in subtitle:
+        subtitle["output_path"] = relative_media(
+            require_text(subtitle["output_path"], f"{label} output_path")
+        )
+    return subtitle
+
+
+def cues_to_captions(cues: Sequence[Cue], fps: float = DEFAULT_FPS) -> list[dict[str, Any]]:
+    """Convert subtitle cues into canonical plan captions, in frames at ``fps``.
+
+    This is how an external transcript becomes plan content: the ASR seam
+    returns seconds, and the canonical plan is frame-based, so the conversion
+    runs through the same :func:`to_frames` round-half-up rule every other link
+    uses rather than a second, drifting one.
+
+    A cue shorter than one frame would vanish on a frame-based timeline, so the
+    duration floors at 1 -- the rule :func:`compile_recipe` already applies to
+    recipe clips.
+    """
+    rate = require_fps(fps)
+    captions = []
+    for cue in cues:
+        start = to_frames(cue.start, rate)
+        end = to_frames(cue.end, rate)
+        captions.append({"text": cue.text, "start": start, "duration": max(1, end - start)})
+    return captions
+
+
+def _normalized_subtitles(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise the subtitle entries into one list.
+
+    ``subtitle`` (one track) and ``subtitles`` (several) are input aliases for
+    the same thing, and giving both is an error rather than a union: silently
+    merging them would make the plan mean something the author did not write.
+    The canonical document carries only ``subtitles``, so there is exactly one
+    shape for consumers to read -- the property Stage 2 unified the plan for in
+    the first place.
+    """
+    single = plan.get("subtitle")
+    many = plan.get("subtitles")
+    if single is not None and many is not None:
+        raise ValueError("plan must carry either 'subtitle' or 'subtitles', not both")
+    if single is not None:
+        return [_validate_subtitle(single, 0)]
+    if many is None:
+        return []
+    if not isinstance(many, list):
+        raise ValueError("subtitles must be a list")
+    if not many:
+        raise ValueError("subtitles must not be empty; omit the field instead")
+    return [_validate_subtitle(spec, index) for index, spec in enumerate(many)]
 
 
 def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -346,36 +459,7 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
     normalized["tracks"] = tracks
     normalized["captions"] = captions
 
-    subtitle = plan.get("subtitle")
-    if subtitle is not None:
-        require_object(subtitle, _SUBTITLE_FIELDS, {"file"}, "subtitle")
-        fmt = subtitle.get("format")
-        if fmt is not None and fmt not in SUBTITLE_FORMATS:
-            raise ValueError(f"subtitle format must be one of {list(SUBTITLE_FORMATS)}")
-        normalized["subtitle"] = {
-            # Same portable-path rule as clip media, enforced on this entry point
-            # too. An absolute path would be resolved by pathlib as-is and escape
-            # media_dir entirely, which would defeat the delivery-root check and
-            # make the plan non-relocatable -- and the recipe entry point would
-            # reject the very same value.
-            "file": relative_media(subtitle["file"]),
-            **{
-                key: value
-                for key, value in (
-                    ("format", fmt),
-                    ("offset", _optional_number(subtitle.get("offset"), "subtitle offset")),
-                    ("language", subtitle.get("language")),
-                    ("style", subtitle.get("style")),
-                )
-                if value is not None
-            },
-        }
-        if "language" in normalized["subtitle"]:
-            require_text(normalized["subtitle"]["language"], "subtitle language")
-        if "style" in normalized["subtitle"] and not isinstance(
-            normalized["subtitle"]["style"], dict
-        ):
-            raise ValueError("subtitle style must be an object")
+    normalized["subtitles"] = _normalized_subtitles(plan)
 
     output = plan.get("output")
     if output is not None:
@@ -409,6 +493,7 @@ _RECIPE_FIELDS = {
     "media",
     "music",
     "subtitle_file",
+    "subtitle_files",
     "captions",
     "output_path",
 }
@@ -558,9 +643,33 @@ def compile_recipe(
         "captions": captions,
     }
 
+    # One alias each, never both: the recipe profile mirrors the canonical
+    # plan's rule so a hand-written recipe cannot express two shapes at once.
     subtitle_file = recipe.get("subtitle_file")
+    subtitle_files = recipe.get("subtitle_files")
+    if subtitle_file is not None and subtitle_files is not None:
+        raise ValueError("recipe must carry either 'subtitle_file' or 'subtitle_files', not both")
     if subtitle_file is not None:
         plan["subtitle"] = {"file": _normalize_relative_path(subtitle_file, "subtitle_file")}
+    elif subtitle_files is not None:
+        if not isinstance(subtitle_files, list) or not subtitle_files:
+            raise ValueError("recipe subtitle_files must be a nonempty list")
+        entries: list[dict[str, Any]] = []
+        for index, entry in enumerate(subtitle_files):
+            label = f"recipe subtitle_files {index}"
+            # A bare string is a path; an object may also carry presentation.
+            source = entry.get("file") if isinstance(entry, dict) else entry
+            item = {"file": _normalize_relative_path(source, label)}
+            if isinstance(entry, dict):
+                # Forwarded as a set rather than a hand-picked pair: an entry
+                # that asked for sequence alignment and had it silently dropped
+                # at compile time would import the unaligned file and look like
+                # it worked.
+                for key in ("format", "offset", "language", "style", "align", "output_path"):
+                    if entry.get(key) is not None:
+                        item[key] = entry[key]
+            entries.append(item)
+        plan["subtitles"] = entries
     output_path = recipe.get("output_path")
     if output_path is not None or recipe.get("aspect_ratio") is not None:
         plan["output"] = {"aspect_ratio": aspect_ratio}
@@ -700,15 +809,16 @@ def plan_to_actions(
             media_keys[clip["media"]] = key
             media_order.append(clip["media"])
 
-    # The subtitle file is a referenced file too: it is handed to the host as a
-    # path just like the media is. Checking it here -- with the clip media, in
-    # one pass -- is what keeps "every referenced file must exist" true before
-    # the first dispatch, rather than failing at import_subtitles after the
-    # timeline has already been populated.
-    subtitle = normalized.get("subtitle")
+    # Every subtitle file is a referenced file too: each one is handed to the
+    # host as a path just like the media is. Checking them here -- with the
+    # clip media, in one pass -- is what keeps "every referenced file must
+    # exist" true before the first dispatch, rather than failing part-way
+    # through a multi-language import after the timeline is already populated.
+    subtitles = normalized["subtitles"]
     referenced = list(media_order)
-    if subtitle is not None and subtitle["file"] not in referenced:
-        referenced.append(subtitle["file"])
+    for subtitle in subtitles:
+        if subtitle["file"] not in referenced:
+            referenced.append(subtitle["file"])
 
     resolved = media_order
     resolved_references: dict[str, Path] = {}
@@ -794,20 +904,37 @@ def plan_to_actions(
                 params["fade_out"] = audio["fade_out"]
             actions.append({"action": "add_audio_fade", "params": params})
 
-    if subtitle is not None:
-        subtitle_path = subtitle["file"]
-        if media_dir is not None:
-            subtitle_path = str(resolved_references[subtitle["file"]])
-        params = {"timeline_id": TIMELINE_PLACEHOLDER, "path": subtitle_path}
-        if subtitle.get("format") is not None:
-            params["format"] = subtitle["format"]
-        if subtitle.get("offset"):
-            params["offset"] = subtitle["offset"]
-        if subtitle.get("language") is not None:
-            params["language"] = subtitle["language"]
-        if subtitle.get("style") is not None:
-            params["style"] = subtitle["style"]
-        actions.append({"action": "import_subtitles", "params": params})
+    if subtitles:
+        # One import per subtitle file: each becomes its own editable text
+        # track, and the fail-closed contract returns one caption_ids list per
+        # call, so a merged import could not be mapped back to a language.
+        for subtitle in subtitles:
+            subtitle_path = subtitle["file"]
+            if media_dir is not None:
+                subtitle_path = str(resolved_references[subtitle["file"]])
+            params = {"timeline_id": TIMELINE_PLACEHOLDER, "path": subtitle_path}
+            if subtitle.get("format") is not None:
+                params["format"] = subtitle["format"]
+            if subtitle.get("offset"):
+                params["offset"] = subtitle["offset"]
+            if subtitle.get("language") is not None:
+                params["language"] = subtitle["language"]
+            if subtitle.get("style") is not None:
+                params["style"] = subtitle["style"]
+            if subtitle.get("align") not in (None, ALIGN_TIMECODE):
+                params["align"] = subtitle["align"]
+                # An alignment output is a write target, not an input, so it is
+                # resolved against the delivery root but never required to exist.
+                params["output_path"] = (
+                    str(
+                        resolve_referenced_files(base, [subtitle["output_path"]])[
+                            subtitle["output_path"]
+                        ]
+                    )
+                    if media_dir is not None
+                    else subtitle["output_path"]
+                )
+            actions.append({"action": "import_subtitles", "params": params})
     else:
         for caption in normalized["captions"]:
             params = {

@@ -32,6 +32,7 @@ from dcc_mcp_capcut.editplan import (
     relative_media,
 )
 from dcc_mcp_capcut.interchange import export_otio
+from dcc_mcp_capcut.subtitles import parse_cues
 
 ROOT = Path(__file__).parents[1]
 
@@ -175,7 +176,7 @@ def test_recipe_captions_and_subtitle_survive_compilation(recipe):
 
     assert [caption["start"] for caption in plan["captions"]] == [18, 72, 150, 225, 306]
     assert plan["captions"][0]["style"]["size"] == 48
-    assert plan["subtitle"] == {"file": "galaxy_zh.srt"}
+    assert plan["subtitles"] == [{"file": "galaxy_zh.srt"}]
     assert plan["output"] == {"path": "./output/free-travel-vlog.mp4", "aspect_ratio": "9:16"}
 
 
@@ -411,7 +412,7 @@ def test_subtitle_file_replaces_per_caption_text_steps(recipe):
     assert not [step for step in steps if step["action"] == "add_text"]
 
     captions_only = copy.deepcopy(plan)
-    del captions_only["subtitle"]
+    del captions_only["subtitles"]
     assert (
         len([s for s in plan_to_actions(captions_only)["actions"] if s["action"] == "add_text"])
         == 5
@@ -489,7 +490,7 @@ def test_subtitle_file_must_be_a_portable_relative_path(plan):
 
     broken = copy.deepcopy(plan)
     broken["subtitle"] = {"file": "galaxy_zh.srt"}
-    assert normalize_plan(broken)["subtitle"]["file"] == "galaxy_zh.srt"
+    assert normalize_plan(broken)["subtitles"] == [{"file": "galaxy_zh.srt"}]
 
 
 def test_subtitle_cannot_escape_the_delivery_root(plan, tmp_path):
@@ -541,6 +542,49 @@ def test_referenced_lists_every_file_a_dispatch_needs(recipe):
         "assets/free_ambient.wav",
         "galaxy_zh.srt",
     ]
+
+
+def test_the_shipped_demo_supports_a_two_language_plan(tmp_path):
+    """The multi-language hand-off the demo README documents must actually resolve.
+
+    The media is downloaded by ``fetch_assets.py``, so only the two checked-in
+    SRTs are read from the real ``demo/``; the media is staged empty, exactly as
+    the other demo-layout test does.
+    """
+    root = tmp_path / "demo"
+    (root / "assets").mkdir(parents=True)
+    for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+        (root / "assets" / name).write_bytes(b"")
+    for name in ("galaxy_zh.srt", "galaxy_en.srt"):
+        assert (ROOT / "demo" / name).is_file(), f"the checked-in {name} is gone"
+        (root / name).write_bytes((ROOT / "demo" / name).read_bytes())
+
+    plan = compile_plan(load_shipped_recipe(), media_index=MEDIA_INDEX)
+    plan.pop("subtitles")
+    plan["subtitles"] = [
+        {"file": "galaxy_zh.srt", "language": "zh-CN"},
+        {"file": "galaxy_en.srt", "language": "en-US"},
+    ]
+
+    compiled = normalize_plan(plan)
+    assert [entry["file"] for entry in compiled["subtitles"]] == [
+        "galaxy_zh.srt",
+        "galaxy_en.srt",
+    ]
+
+    script = plan_to_actions(compiled, media_dir=str(root))
+    steps = [step for step in script["actions"] if step["action"] == "import_subtitles"]
+
+    assert len(steps) == 2, "each language must land on its own text track"
+    assert [step["params"]["language"] for step in steps] == ["zh-CN", "en-US"]
+    assert [Path(step["params"]["path"]).name for step in steps] == [
+        "galaxy_zh.srt",
+        "galaxy_en.srt",
+    ]
+    # Both are real subtitle files, not just paths that resolve.
+    assert all(
+        parse_cues(Path(step["params"]["path"]).read_text(encoding="utf-8")) for step in steps
+    )
 
 
 def test_export_step_requires_an_output_path(plan):
@@ -847,3 +891,255 @@ def test_offline_renderer_music_mix_comes_from_the_plan(recipe):
 
     assert render_vlog.duration_seconds(plan) == 12.5
     assert music["audio"]["volume"] == 0.22
+
+
+# ---------------------------------------------------------------------------
+# Multiple subtitle tracks
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Multiple subtitle tracks
+# ---------------------------------------------------------------------------
+
+
+def test_a_plan_without_subtitles_normalises_to_an_empty_list(plan):
+    """One shape for consumers to read: the list is always there."""
+    assert normalize_plan(plan)["subtitles"] == []
+
+
+def test_subtitle_and_subtitles_are_input_aliases_for_the_same_list(plan):
+    single = normalize_plan({**plan, "subtitle": {"file": "zh.srt"}})
+    plural = normalize_plan({**plan, "subtitles": [{"file": "zh.srt"}]})
+    assert single["subtitles"] == plural["subtitles"] == [{"file": "zh.srt"}]
+
+
+def test_supplying_both_subtitle_forms_is_rejected(plan):
+    """Unioning them would make the plan mean something the author did not write."""
+    with pytest.raises(ValueError, match="either 'subtitle' or 'subtitles', not both"):
+        normalize_plan({**plan, "subtitle": {"file": "zh.srt"}, "subtitles": [{"file": "en.srt"}]})
+
+
+def test_normalisation_is_idempotent_for_subtitles(plan):
+    """apply_edit_plan normalises twice, so the output must re-normalise cleanly."""
+    once = normalize_plan({**plan, "subtitles": [{"file": "zh.srt", "language": "zh-CN"}]})
+    assert normalize_plan(once) == once
+
+
+def test_multi_language_subtitles_survive_compilation(plan):
+    compiled = normalize_plan(
+        {
+            **plan,
+            "subtitles": [
+                {"file": "subs/zh.srt", "language": "zh-CN", "format": "srt"},
+                {"file": "subs/en.srt", "language": "en-US", "offset": 0.5},
+            ],
+        }
+    )
+    assert compiled["subtitles"] == [
+        {"file": "subs/zh.srt", "format": "srt", "language": "zh-CN"},
+        {"file": "subs/en.srt", "offset": 0.5, "language": "en-US"},
+    ]
+
+
+def test_each_subtitle_becomes_its_own_import_step(plan):
+    """One import per file: caption_ids comes back per call, so a merged import
+    could not be mapped to the language it belongs to."""
+    with_subtitles = {
+        **plan,
+        "subtitles": [
+            {"file": "zh.srt", "language": "zh-CN"},
+            {"file": "en.srt", "language": "en-US"},
+        ],
+    }
+    steps = [
+        step
+        for step in plan_to_actions(with_subtitles)["actions"]
+        if step["action"] == "import_subtitles"
+    ]
+    assert len(steps) == 2
+    assert [step["params"]["path"] for step in steps] == ["zh.srt", "en.srt"]
+    assert [step["params"]["language"] for step in steps] == ["zh-CN", "en-US"]
+
+
+def test_every_subtitle_file_is_a_referenced_file(plan, tmp_path):
+    """All of them are checked up front, not one at a time as the walk reaches them."""
+    (tmp_path / "media").mkdir()
+    for name in ("opening.mp4", "second.mp4", "bed.wav"):
+        (tmp_path / "media" / name).write_bytes(b"")
+    (tmp_path / "zh.srt").write_bytes(b"")
+
+    with_subtitles = {**plan, "subtitles": [{"file": "zh.srt"}, {"file": "en.srt"}]}
+    with pytest.raises(ValueError, match="does not contain every referenced file:") as caught:
+        plan_to_actions(with_subtitles, media_dir=str(tmp_path))
+    assert "en.srt" in str(caught.value)
+
+    (tmp_path / "en.srt").write_bytes(b"")
+    script = plan_to_actions(with_subtitles, media_dir=str(tmp_path))
+    assert script["referenced"] == [
+        "media/opening.mp4",
+        "media/second.mp4",
+        "media/bed.wav",
+        "zh.srt",
+        "en.srt",
+    ]
+    steps = [step for step in script["actions"] if step["action"] == "import_subtitles"]
+    assert [step["params"]["path"] for step in steps] == [
+        str(tmp_path / "zh.srt"),
+        str(tmp_path / "en.srt"),
+    ]
+
+
+def test_a_subtitle_file_must_still_be_a_portable_relative_path(plan):
+    for bad in ("C:/Windows/win.ini", "/etc/hostname", "../secrets.srt"):
+        broken = {**plan, "subtitles": [{"file": bad}]}
+        with pytest.raises(ValueError, match="media must be a portable relative path"):
+            normalize_plan(broken)
+
+
+def test_an_empty_subtitles_list_is_rejected(plan):
+    with pytest.raises(ValueError, match="subtitles must not be empty"):
+        normalize_plan({**plan, "subtitles": []})
+
+
+def test_a_non_list_subtitles_value_is_rejected(plan):
+    with pytest.raises(ValueError, match="subtitles must be a list"):
+        normalize_plan({**plan, "subtitles": {"file": "zh.srt"}})
+
+
+def test_subtitle_entries_are_validated_individually(plan):
+    with pytest.raises(ValueError, match="subtitle 1 requires"):
+        normalize_plan({**plan, "subtitles": [{"file": "zh.srt"}, {"language": "en"}]})
+
+
+# ---------------------------------------------------------------------------
+# Subtitle alignment inside a plan
+# ---------------------------------------------------------------------------
+
+
+def test_timecode_alignment_is_the_default_and_adds_no_params(plan):
+    with_subtitles = {**plan, "subtitle": {"file": "zh.srt"}}
+    steps = [
+        step
+        for step in plan_to_actions(with_subtitles)["actions"]
+        if step["action"] == "import_subtitles"
+    ]
+    assert "align" not in steps[0]["params"]
+    assert "output_path" not in steps[0]["params"]
+
+
+def test_sequence_alignment_requires_an_output_path(plan):
+    """The plan is host-free; it cannot pick a write location on the user's disk."""
+    with pytest.raises(ValueError, match="align='sequence' requires output_path"):
+        normalize_plan({**plan, "subtitle": {"file": "zh.srt", "align": "sequence"}})
+
+
+def test_an_unknown_alignment_is_rejected_at_compile_time(plan):
+    with pytest.raises(ValueError, match="align must be one of"):
+        normalize_plan({**plan, "subtitle": {"file": "zh.srt", "align": "by-vibes"}})
+
+
+def test_sequence_alignment_carries_a_resolved_output_path(plan, tmp_path):
+    (tmp_path / "media").mkdir()
+    for name in ("opening.mp4", "second.mp4", "bed.wav"):
+        (tmp_path / "media" / name).write_bytes(b"")
+    (tmp_path / "zh.srt").write_bytes(b"")
+
+    with_subtitles = {
+        **plan,
+        "subtitle": {"file": "zh.srt", "align": "sequence", "output_path": "out/zh.aligned.srt"},
+    }
+    script = plan_to_actions(with_subtitles, media_dir=str(tmp_path))
+    steps = [step for step in script["actions"] if step["action"] == "import_subtitles"]
+
+    assert steps[0]["params"]["align"] == "sequence"
+    assert steps[0]["params"]["output_path"] == str(tmp_path / "out" / "zh.aligned.srt")
+    # An alignment output is written, not read, so it must not be required to exist.
+    assert "out/zh.aligned.srt" not in script["referenced"]
+
+
+def test_an_alignment_output_cannot_escape_the_delivery_root(plan):
+    escaped = {
+        **plan,
+        "subtitle": {"file": "zh.srt", "align": "sequence", "output_path": "../outside.srt"},
+    }
+    with pytest.raises(ValueError, match="media must be a portable relative path"):
+        normalize_plan(escaped)
+
+
+# ---------------------------------------------------------------------------
+# The recipe profile's multi-subtitle form
+# ---------------------------------------------------------------------------
+
+
+def test_recipe_subtitle_files_compile_into_the_canonical_list(recipe):
+    # The shipped recipe carries subtitle_file, so drop it: the two are aliases
+    # and a document may only use one.
+    recipe.pop("subtitle_file")
+    compiled = compile_recipe(
+        {**recipe, "subtitle_files": ["zh.srt", {"file": "en.srt", "language": "en-US"}]},
+        media_index=MEDIA_INDEX,
+    )
+    assert compiled["subtitles"] == [{"file": "zh.srt"}, {"file": "en.srt", "language": "en-US"}]
+
+
+def test_recipe_rejects_both_subtitle_forms(recipe):
+    with pytest.raises(ValueError, match="not both"):
+        compile_recipe(
+            {**recipe, "subtitle_file": "zh.srt", "subtitle_files": ["en.srt"]},
+            media_index=MEDIA_INDEX,
+        )
+
+
+def test_recipe_subtitle_files_must_be_a_non_empty_list(recipe):
+    recipe.pop("subtitle_file")
+    with pytest.raises(ValueError, match="nonempty list"):
+        compile_recipe({**recipe, "subtitle_files": []}, media_index=MEDIA_INDEX)
+
+
+def test_recipe_subtitle_paths_are_normalised_to_the_portable_form(recipe):
+    recipe.pop("subtitle_file")
+    compiled = compile_recipe(
+        {**recipe, "subtitle_files": ["./subs/zh.srt"]}, media_index=MEDIA_INDEX
+    )
+    assert compiled["subtitles"] == [{"file": "subs/zh.srt"}]
+
+
+def test_recipe_subtitle_entries_forward_alignment_and_presentation(recipe):
+    """A dropped 'align' would import the unaligned file and look like it worked."""
+    recipe.pop("subtitle_file")
+    compiled = compile_recipe(
+        {
+            **recipe,
+            "subtitle_files": [
+                {
+                    "file": "subs/zh.srt",
+                    "language": "zh-CN",
+                    "align": "sequence",
+                    "output_path": "out/zh.aligned.srt",
+                }
+            ],
+        },
+        media_index=MEDIA_INDEX,
+    )
+    assert compiled["subtitles"] == [
+        {
+            "file": "subs/zh.srt",
+            "language": "zh-CN",
+            "align": "sequence",
+            "output_path": "out/zh.aligned.srt",
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Cues to canonical captions
+# ---------------------------------------------------------------------------
+
+
+def test_cues_become_canonical_captions_through_the_plan_rounding_rule():
+    from dcc_mcp_capcut.editplan import cues_to_captions
+    from dcc_mcp_capcut.subtitles import parse_srt
+
+    cues = parse_srt("1\n00:00:00,600 --> 00:00:02,300\nhello\n")
+    assert cues_to_captions(cues, 30) == [{"text": "hello", "start": 18, "duration": 51}]

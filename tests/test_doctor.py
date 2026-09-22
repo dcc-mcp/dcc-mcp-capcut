@@ -670,3 +670,110 @@ def test_doctor_never_mutates_the_environment(pin_platform):
     before = dict(os.environ)
     doctor.run_doctor()
     assert dict(os.environ) == before
+
+
+# ---------------------------------------------------------------------------
+# The external ASR executor seam
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def asr_env(monkeypatch):
+    """Control the ASR seam without touching the real environment."""
+
+    def _set(value):
+        if value is None:
+            monkeypatch.delenv("DCC_MCP_CAPCUT_ASR_EXECUTOR", raising=False)
+        else:
+            monkeypatch.setenv("DCC_MCP_CAPCUT_ASR_EXECUTOR", str(value))
+        return doctor.check_asr_executor()
+
+    return _set
+
+
+def test_an_unset_executor_is_a_warning_and_names_the_variable(asr_env):
+    """Acceptance: the doctor must say plainly that no ASR executor is configured."""
+    check = asr_env(None)
+
+    assert check.name == "asr_executor"
+    assert check.status == doctor.WARN
+    assert "no ASR executor configured" in check.summary
+    assert "DCC_MCP_CAPCUT_ASR_EXECUTOR" in check.summary
+    assert check.detail == {
+        "configured": False,
+        "env": "DCC_MCP_CAPCUT_ASR_EXECUTOR",
+        "usable": False,
+    }
+
+
+def test_the_unset_warning_says_the_adapter_ships_no_model(asr_env):
+    """A user has to be able to tell 'not configured' from 'broken'."""
+    check = asr_env(None)
+    assert "no ASR model" in check.hint
+    assert "DCC_MCP_CAPCUT_ASR_EXECUTOR" in check.hint
+
+
+def test_a_blank_executor_value_is_still_unconfigured(asr_env):
+    check = asr_env("   ")
+    assert check.status == doctor.WARN
+    assert check.detail["configured"] is False
+
+
+def test_a_configured_executor_is_ok(asr_env, tmp_path):
+    executor = tmp_path / "transcribe.py"
+    executor.write_text("print('')", encoding="utf-8")
+    if os.name == "posix":
+        executor.chmod(0o755)
+
+    check = asr_env(executor)
+
+    assert check.status == doctor.OK
+    assert check.summary == f"ASR executor configured: {executor}"
+    assert check.detail["usable"] is True
+    assert check.detail["path"] == str(executor)
+    assert check.hint is None
+
+
+def test_a_path_that_is_not_a_file_is_a_warning_not_a_failure(asr_env, tmp_path):
+    """Transcription is optional, so a misconfiguration must not fail the preflight."""
+    check = asr_env(tmp_path / "absent.py")
+
+    assert check.status == doctor.WARN
+    assert "does not point at a file" in check.summary
+    assert check.detail == {
+        "configured": True,
+        "path": str(tmp_path / "absent.py"),
+        "usable": False,
+    }
+    assert check.hint
+
+
+def test_a_directory_is_reported_as_unusable(asr_env, tmp_path):
+    check = asr_env(tmp_path)
+    assert check.status == doctor.WARN
+    assert check.detail["usable"] is False
+
+
+@pytest.mark.skipif(os.name != "posix", reason="the executable bit is a POSIX rule")
+def test_a_non_executable_file_is_a_warning_that_says_chmod(asr_env, tmp_path):
+    executor = tmp_path / "transcribe.py"
+    executor.write_text("print('')", encoding="utf-8")
+    executor.chmod(0o644)
+
+    check = asr_env(executor)
+
+    assert check.status == doctor.WARN
+    assert "not executable" in check.summary
+    assert "chmod +x" in check.summary
+
+
+def test_the_asr_check_is_registered(pin_platform):
+    assert "asr_executor" in [name for name, _ in doctor.CHECKS]
+
+
+def test_the_asr_check_never_breaks_the_preflight(asr_env):
+    """Whatever state the seam is in, the doctor still produces a verdict."""
+    for value in (None, "   ", "C:/definitely/not/here.py"):
+        check = asr_env(value)
+        assert check.status in doctor.STATUSES
+        assert check.status != doctor.FAIL

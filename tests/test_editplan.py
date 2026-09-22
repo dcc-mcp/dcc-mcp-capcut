@@ -20,6 +20,7 @@ import pytest
 
 from dcc_mcp_capcut.editplan import (
     PLAN_SCHEMA,
+    UNSUPPORTED_ACTION_TEMPLATES,
     VLOG_RECIPE_SCHEMA,
     compile_plan,
     compile_recipe,
@@ -554,6 +555,27 @@ def test_export_step_requires_an_output_path(plan):
     assert steps[-2]["params"]["output_path"] == "out/vlog.mp4"
 
 
+def test_the_rejection_match_is_an_allowlist_not_a_pattern():
+    """Structural guard: no more regex tightening rounds.
+
+    Four successive pattern-matching versions each left a residual seam, and
+    every seam was a false positive -- the expensive direction. Matching whole
+    shapes removes the class of bug, so assert that is what the code does: the
+    templates are literal strings with a single ``{action}`` field, and no
+    regular expression is involved.
+    """
+    import dcc_mcp_capcut.editplan as editplan
+
+    source = Path(editplan.__file__).read_text(encoding="utf-8")
+    assert "re.search" not in source
+    for template in UNSUPPORTED_ACTION_TEMPLATES:
+        assert template.count("{action}") == 1
+        # Every template is marker + action, with nothing in between that could
+        # absorb a qualifier like "parameter".
+        prefix = template.split("{action}")[0].strip()
+        assert prefix.rstrip(":").replace("_", " ") == "unsupported action", template
+
+
 def test_a_parameter_error_from_a_host_that_implements_the_action():
     """Regression: the misclassification CodeRabbit found at editplan.py:822.
 
@@ -577,19 +599,45 @@ def test_a_parameter_error_from_a_host_that_implements_the_action():
 
 
 def test_the_documented_rejection_shape_still_matches():
-    """The anchored pattern must keep accepting what HOST_API.md promises."""
+    """The allowlist must keep accepting what HOST_API.md promises."""
     for message in (
         "Unsupported action: apply_edit_plan",
         "unsupported action: apply_edit_plan",
         "Unsupported action:  apply_edit_plan",
         '{"unsupported_action": "apply_edit_plan"}',
         "{'unsupported_action': 'apply_edit_plan'}",
+        "[{'unsupported_action': 'apply_edit_plan'}]",
         "Unsupported Action: APPLY_EDIT_PLAN",
+        "unsupported action apply_edit_plan",
+        "Unsupported action: apply_edit_plan (not implemented)",
+        "Unsupported action: apply_edit_plan, try again",
     ):
         assert is_unsupported_action(RuntimeError(message)), message
 
-    # A longer action name that merely starts with this one is not a match.
-    assert not is_unsupported_action(RuntimeError("Unsupported action: apply_edit_plan_v2"))
+
+def test_a_suffixed_action_name_is_a_different_action():
+    r"""Regression for the review finding at editplan.py:853.
+
+    A trailing ``\b`` is not enough: Python's ``\w`` excludes ``-`` and ``.``, so
+    both count as word boundaries and ``apply_edit_plan-v2`` / ``.v2`` / ``.beta``
+    matched. Each names a *different* action, and treating any of them as this
+    one replays the plan as a composed script over a timeline the batch action
+    may already have partly assembled.
+    """
+    for message in (
+        "Unsupported action: apply_edit_plan-v2",
+        "Unsupported action: apply_edit_plan.v2",
+        "unsupported_action: apply_edit_plan.beta",
+        "Unsupported action: apply_edit_plan_extra",
+        "Unsupported action: apply_edit_plan2",
+        "Unsupported action: apply_edit_plan.",
+    ):
+        assert not is_unsupported_action(RuntimeError(message)), message
+
+    # The scoping argument still works: a suffixed name matches its own action.
+    assert is_unsupported_action(
+        RuntimeError("Unsupported action: apply_edit_plan-v2"), "apply_edit_plan-v2"
+    )
 
 
 def test_a_symlink_cannot_escape_the_delivery_root(recipe, tmp_path):

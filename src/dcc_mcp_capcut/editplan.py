@@ -31,9 +31,9 @@ encoding a guess.
 
 from __future__ import annotations
 
+import json
 import math
 import posixpath
-import re
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
@@ -61,16 +61,29 @@ MEDIA_PLACEHOLDER = "$media:"
 TIMELINE_PLACEHOLDER = "$timeline"
 CLIP_PLACEHOLDER = "$clip:"
 
-# The exact phrasing a host uses to reject an action it does not implement; see
-# capcut_panel/HOST_API.md. Anchored on the documented shape -- marker, colon,
-# then the action name -- rather than matched as bare substrings, because a host
-# that *does* implement the action reports bad arguments with overlapping words
-# ("Unsupported action parameter for apply_edit_plan: media_dir"). Mistaking
-# that for "not implemented" replays the whole plan as a composed script after
-# the batch action may already have applied part of it, and the composed walk
-# does not roll back. A false positive is far costlier than a false negative,
-# so the match is deliberately strict.
-UNSUPPORTED_ACTION_PATTERN = r"unsupported[ _]action['\"]?\s*:\s*['\"]?"
+# The rejection shapes a host uses for "I do not implement this action"; see
+# capcut_panel/HOST_API.md. These are templates, not search patterns: the
+# message must *be* one of them, optionally followed by trailing text. Anything
+# else is a real failure.
+#
+# An allowlist rather than an ever-tighter regex, because pattern matching on
+# prose kept leaving gaps: a substring test accepted "unsupported action
+# parameter for apply_edit_plan", and a "\b"-terminated one still accepted
+# "apply_edit_plan-v2" and "apply_edit_plan.v2" (Python's \w excludes - and .
+# so both count as boundaries). Each tightening round found the next residual
+# seam. Matching the whole shape removes the class of bug instead: a host
+# reporting a *different* action, or an argument error on this one, simply does
+# not match. A false positive replays the plan as a composed script over a
+# timeline the batch action may already have partly assembled, and the composed
+# walk does not roll back -- so false positives are far costlier than the fast
+# path this enables.
+UNSUPPORTED_ACTION_TEMPLATES = (
+    "unsupported action: {action}",
+    "unsupported_action: {action}",
+    # Colon-less variants, for a host that omits it.
+    "unsupported action {action}",
+    "unsupported_action {action}",
+)
 
 
 def relative_media(value: Any) -> str:
@@ -838,20 +851,63 @@ def plan_to_actions(
 def is_unsupported_action(error: BaseException, action: str = "apply_edit_plan") -> bool:
     """Report whether a host rejection means "this exact action is not implemented".
 
-    Matches the documented rejection shape ``unsupported action: <action>``
-    (``unsupported_action: <action>`` in a structured payload). Requiring the
-    colon rules out the parameter errors a host that *does* implement the action
-    reports, such as ``Unsupported action parameter for apply_edit_plan:
-    media_dir`` -- which contains both the marker and the action name and would
-    otherwise trigger a fallback that replays the plan over a timeline the batch
-    action may already have partly assembled. The trailing word boundary rejects
-    a longer action name that merely starts with this one.
+    The message must open with one of :data:`UNSUPPORTED_ACTION_TEMPLATES` and
+    then end the action name, so ``apply_edit_plan-v2``, ``apply_edit_plan.v2``
+    and ``apply_edit_plan_extra`` are all read as *different* actions, and
+    ``Unsupported action parameter for apply_edit_plan: media_dir`` is read as
+    an argument error from a host that does implement the action.
+
+    Getting this wrong in the permissive direction is expensive: a false
+    positive makes ``auto`` replay the whole plan as a composed script over a
+    timeline the batch action may already have partly assembled, and the composed
+    walk does not roll back. A false negative merely costs the fast path, since
+    composition still works.
     """
-    # An optional quote absorbs the stringified structured form
-    # "{'unsupported_action': 'apply_edit_plan'}", where the panel has already
-    # turned a dict rejection into text.
-    pattern = UNSUPPORTED_ACTION_PATTERN + re.escape(action.lower()) + r"\b"
-    return bool(re.search(pattern, str(error).lower()))
+    message = _normalized_rejection_text(str(error))
+    accepted = [template.format(action=action.lower()) for template in UNSUPPORTED_ACTION_TEMPLATES]
+    return any(_rejection_names(message, shape) for shape in accepted)
+
+
+def _normalized_rejection_text(message: str) -> str:
+    """Reduce a host rejection to the ``key: value`` text the templates expect.
+
+    The panel stringifies structured rejections, so a dict rejection arrives as
+    ``{'unsupported_action': 'apply_edit_plan'}``. Parsing that and re-joining it
+    as ``key: value`` is what lets one set of templates match both the structured
+    and the prose form -- rather than enumerating quote permutations, which is
+    how the earlier pattern-matching versions kept leaving a gap.
+    """
+    candidate = " ".join(message.lower().split()).strip()
+    for _ in range(2):
+        if not candidate.startswith(("{", "[")):
+            break
+        try:
+            payload = json.loads(candidate.replace("'", '"'))
+        except ValueError:
+            break
+        if isinstance(payload, list) and len(payload) == 1:
+            candidate = str(payload[0])
+            continue
+        if isinstance(payload, dict):
+            return "; ".join(f"{key}: {value}" for key, value in payload.items())
+        break
+    return candidate
+
+
+def _rejection_names(message: str, shape: str) -> bool:
+    """Report whether ``message`` opens with ``shape`` and then ends the name.
+
+    The next character must be a delimiter rather than a name character. A period
+    or hyphen is deliberately *not* one, because both continue an action name
+    (``apply_edit_plan.v2``): accepting them would read a different action as
+    this one. That costs a false negative on a message ending in a sentence
+    period, which only forfeits the fast path -- composition still works --
+    whereas the opposite error replays the plan over a partly assembled timeline.
+    """
+    if not message.startswith(shape):
+        return False
+    following = message[len(shape) : len(shape) + 1]
+    return following in ("", " ", "'", '"', "]", "}", ")", ",", ";", ":")
 
 
 def substitute_placeholders(params: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

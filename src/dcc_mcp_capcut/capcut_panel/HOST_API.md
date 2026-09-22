@@ -51,9 +51,24 @@ as a project. A host that implements it should:
 Unsupported action: apply_edit_plan
 ```
 
-The adapter matches the marker `unsupported action` (or `unsupported_action` in
-a structured payload), a colon, then the action name. The panel stringifies
-rejections, so the text has to carry all of it.
+The adapter accepts these exact shapes and nothing else:
+
+```text
+unsupported action: apply_edit_plan
+unsupported_action: apply_edit_plan
+unsupported action apply_edit_plan
+unsupported_action apply_edit_plan
+```
+
+The whole message must open with one of them and then end the action name. The
+panel stringifies rejections, so a structured payload such as
+`{'unsupported_action': 'apply_edit_plan'}` is normalised to `unsupported_action:
+apply_edit_plan` before comparison -- the message is not pattern-searched for a
+substring anywhere inside it.
+
+Ending the name matters: `apply_edit_plan-v2`, `apply_edit_plan.v2` and
+`apply_edit_plan_extra` are all *different* actions and must not be reported
+with this action's name.
 
 **Be precise about which failure you are reporting.** A host that *does*
 implement the action and rejects one of its arguments must **not** use that

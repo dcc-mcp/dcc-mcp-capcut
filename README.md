@@ -29,7 +29,8 @@ installs anything: every plan still goes through the operator-owned
 The bundled skills cover project lifecycle/settings, media import/relink and
 proxies, timeline/clip editing, transitions, text and auto-captions, audio
 mixing/fades, effects and color, AI helpers (background removal/stabilization),
-video/thumbnail export, and a complete `build_vlog_demo` recipe.
+video/thumbnail export, one-call assembly of a whole edit plan, and a complete
+`build_vlog_demo` recipe.
 
 ## Run locally
 
@@ -70,20 +71,48 @@ Verify with `GET /health` on the bridge URL, and set
 
 `demo/assets.json` records NASA/JPL public-domain source pages and attribution
 notes. Run `python demo/fetch_assets.py`, then `python demo/render_vlog.py` for
-an offline 9:16 proof in `demo/output/free-travel-vlog.mp4`. When CapCut is
-available, call `auto_setup_capcut`, import the same assets, and replay
-`demo/vlog_recipe.json` through `build_vlog_demo` for a native project export.
+an offline 9:16 proof in `demo/output/free-travel-vlog.mp4`. The render is
+driven by the canonical edit plan and writes it to
+`demo/output/free-travel-vlog.plan.json`; feed that file to `apply_edit_plan`
+with `media_dir` set to `demo/` for a native CapCut project. That directory is
+the delivery root the plan's portable relative paths resolve against.
+
+## Canonical edit plan
+
+`dcc-mcp-capcut/edit-plan/v1` is the one plan document the adapter agrees on,
+documented in [`docs/edit-plan.md`](docs/edit-plan.md). `compile_edit_plan`
+normalises a plan or a vlog recipe into it, and three links consume it:
+
+| Link | Tool | Host needed |
+| --- | --- | --- |
+| Compile/validate | `compile_edit_plan` | no |
+| Portable export/import | `export_otio` / `import_otio` | no |
+| Assemble into CapCut | `apply_edit_plan` | yes |
+
+All three share one set of rules, so a plan that compiles is a plan every link
+accepts — previously the vlog recipe and the OTIO exporter disagreed about
+whether two clips on one track could overlap. The one exception is OTIO export,
+which additionally requires `media_duration` on every clip because it will not
+write an `available_range` it cannot prove.
+
+Assembly is one call instead of a hand-orchestrated sequence: `apply_edit_plan`
+takes a plan plus a media directory, validates it host-free, and lowers it to
+an ordered action script. Use `dry_run: true` to inspect that script without
+dispatching anything. See
+[ADR 0002](docs/adr/0002-canonical-edit-plan-and-assembly.md) for the spike
+behind it.
 
 ## Portable OpenTimelineIO export
 
 Install `dcc-mcp-capcut[interchange]` to enable the `capcut-interchange`
-skill's `export_otio` tool, or use the host-independent CLI:
+skill's `export_otio` and `import_otio` tools, or use the host-independent CLI:
 
 ```powershell
 python -m dcc_mcp_capcut.interchange --input edit.json --output timeline.otio
 ```
 
-The input is an explicit frame-based edit decision list, with `name`, `fps`,
+`export_otio` accepts either that explicit edit decision list or a canonical
+`plan` document, which it lowers to the EDL below. The list has `name`, `fps`,
 `width`, `height`, `duration_frames`, and `tracks`. Each track has `name`,
 `kind` (`Video` or `Audio`), and ordered `clips`. Each clip specifies `name`,
 relative `media` path, timeline `start`, optional `source_in` (default 0),
@@ -99,6 +128,11 @@ This is export from supplied edit decisions, not a readback of a live CapCut
 project. Bake unsupported effects into media and include SRT for editable
 subtitles. Ship all referenced media with the OTIO file, and resolve relative
 paths from its directory. Other applications may require an OTIO importer.
+
+`import_otio` reads OTIO JSON or an `.otio` file back into a canonical plan.
+Timings, trims, gaps, track structure and caption markers survive; advisory
+presentation fields (audio volume/fades, caption style) have no OTIO
+representation and are reported as dropped rather than reconstructed.
 
 ## Preflight diagnostics
 

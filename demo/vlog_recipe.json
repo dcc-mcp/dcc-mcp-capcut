@@ -3,7 +3,7 @@
   "aspect_ratio": "9:16",
   "media": [
     {"id": "earthrise", "path": "./assets/earthrise.mp4", "start": 0, "duration": 4.5, "track_type": "video"},
-    {"id": "oahu_flyover", "path": "./assets/oahu_flyover.mp4", "start": 4.2, "duration": 8.0, "track_type": "video"}
+    {"id": "oahu_flyover", "path": "./assets/oahu_flyover.mp4", "start": 4.5, "duration": 8.0, "track_type": "video"}
   ],
   "music": {"media_id": "free_music", "start": 0, "volume": 0.22, "fade_in": 0.8, "fade_out": 1.2},
   "subtitle_file": "./galaxy_zh.srt",

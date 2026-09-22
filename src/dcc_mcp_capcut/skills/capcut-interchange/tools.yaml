@@ -1,13 +1,14 @@
 tools:
   - name: export_otio
-    description: Export supplied frame-based edit decisions to OTIO JSON without reading or changing CapCut. Requires interchange extra. Effects must be baked; captions become markers.
+    description: Export supplied edit decisions to OTIO JSON without reading or changing CapCut. Accepts either a frame EDL or a canonical edit plan. Requires interchange extra. Effects must be baked; captions become markers.
     input_schema:
       type: object
       additionalProperties: false
-      required: [timeline]
+      oneOf: [{required: [timeline]}, {required: [plan]}]
       properties:
         timeline:
           type: object
+          description: Frame-based edit decision list; the original strict input shape.
           additionalProperties: false
           required: [name, fps, width, height, duration_frames, tracks]
           properties:
@@ -49,9 +50,65 @@ tools:
                   text: {type: string, minLength: 1}
                   start: {type: integer, minimum: 0}
                   duration: {type: integer, minimum: 1}
+        plan:
+          type: object
+          description: Canonical dcc-mcp-capcut/edit-plan/v1 document; lowered to the frame EDL before export. Mutually exclusive with timeline.
     read_only: true
     destructive: false
     idempotent: true
     execution: sync
     affinity: any
     source_file: scripts/export_otio.py
+  - name: compile_edit_plan
+    description: Compile a canonical edit plan or a vlog recipe into dcc-mcp-capcut/edit-plan/v1 and return the CapCut action script it lowers to. Host-free; the single verdict every link applies.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [document]
+      properties:
+        document:
+          type: object
+          description: A canonical plan (carries 'tracks') or a capcut-vlog-recipe/v1 recipe (carries 'media').
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          default: 30
+          description: Frame rate used when compiling a seconds-based recipe.
+        media_index:
+          type: object
+          description: Maps recipe asset ids to portable relative paths, for entries such as a music bed that carry an id instead of a path.
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/compile_edit_plan.py
+  - name: import_otio
+    description: Read OTIO JSON or an .otio file into a canonical dcc-mcp-capcut/edit-plan/v1 document. Host-free import direction; requires the interchange extra.
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [source]
+      properties:
+        source:
+          type: string
+          minLength: 1
+          description: OTIO JSON text, or a path to an .otio file.
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          description: Frame rate for the resulting plan; required when the file carries no dcc_mcp_capcut metadata.
+        width:
+          type: integer
+          minimum: 1
+          description: Canvas width; required when the file carries no dcc_mcp_capcut metadata.
+        height:
+          type: integer
+          minimum: 1
+          description: Canvas height; required when the file carries no dcc_mcp_capcut metadata.
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/import_otio.py

@@ -213,4 +213,8 @@ jobs:
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
+      # The recipe is validated by compiling it into the canonical edit plan,
+      # so this job needs the package. That is deliberate: a local copy of the
+      # rules is what let the recipe and the OTIO exporter disagree.
+      - run: python -m pip install --disable-pip-version-check .
       - run: python demo/validate_recipe.py demo/vlog_recipe.json

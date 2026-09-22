@@ -32,6 +32,66 @@ the panel must never silently install software or claim readiness before the
 CapCut process, bridge health, panel load, and exact PID/HWND binding are
 verified.
 
+### Batch assembly: `apply_edit_plan`
+
+`apply_edit_plan` is an **optional** action: one call carries a whole
+`dcc-mcp-capcut/edit-plan/v1` document (see `docs/edit-plan.md`) and places it
+as a project. A host that implements it should:
+
+1. Execute the supplied `script.actions` in order, resolving `media_dir`
+   against the plan's portable relative paths.
+2. Return `timeline_id`, `verification.ok: true`, and the authoritative
+   timeline readback under `verification.timeline`.
+3. Be atomic where the host allows it, and return a structured error when it
+   cannot be, naming the steps it already applied.
+
+**A host that does not implement it must reject it with this exact shape:**
+
+```text
+Unsupported action: apply_edit_plan
+```
+
+The adapter accepts these exact shapes and nothing else:
+
+```text
+unsupported action: apply_edit_plan
+unsupported_action: apply_edit_plan
+unsupported action apply_edit_plan
+unsupported_action apply_edit_plan
+```
+
+The whole message must open with one of them and then end the action name. The
+panel stringifies rejections, so a structured payload such as
+`{'unsupported_action': 'apply_edit_plan'}` is normalised to `unsupported_action:
+apply_edit_plan` before comparison -- the message is not pattern-searched for a
+substring anywhere inside it.
+
+Ending the name matters: `apply_edit_plan-v2`, `apply_edit_plan.v2` and
+`apply_edit_plan_extra` are all *different* actions and must not be reported
+with this action's name.
+
+**Be precise about which failure you are reporting.** A host that *does*
+implement the action and rejects one of its arguments must **not** use that
+shape -- put the qualifier before the colon, as in
+`Unsupported action parameter for apply_edit_plan: media_dir`. The two cases are
+distinguished on purpose:
+
+| Host situation | Correct message | Adapter behaviour |
+| --- | --- | --- |
+| Action not implemented | `Unsupported action: apply_edit_plan` | Falls back to composing the plan from the individual actions. |
+| Action implemented, argument invalid | `Unsupported action parameter for apply_edit_plan: media_dir` | Reported as a real failure. Never retried as a different edit. |
+
+Getting this wrong in the first direction is the expensive one: a parameter
+error that looks like "not implemented" makes the adapter replay the whole plan
+as a composed script over a timeline the batch action may already have partly
+assembled, and the composed walk does not roll back. A host that under-reports
+"not implemented" merely loses the fast path and still works via composition.
+Rejecting for any other reason is treated as a real failure and is never retried
+as a different edit.
+
+The adapter's fallback walks the action script itself, so a host can adopt the
+batch action at its own pace; until then `auto` resolves to the composed path.
+
 The host implementation should return stable IDs (`media_id`, `timeline_id`,
 `clip_id`, `text_id`, `effect_id`, `job_id`) and include a post-operation
 readback (`project`, `timeline`, or `export`) so acceptance can verify the real

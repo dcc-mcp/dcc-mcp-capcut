@@ -3,56 +3,25 @@
 The input is an explicit edit decision list, never an inferred live timeline.
 Only straight cuts, track gaps and caption markers are represented. Callers
 must bake effects into media before exporting; unsupported fields are errors.
+
+The field validators and the portable media rule are owned by
+:mod:`dcc_mcp_capcut.editplan`, the canonical edit-plan contract, so the OTIO
+export link and the assembly link cannot drift into two different verdicts for
+the same plan.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
-
-def _object(value: Any, allowed: set[str], required: set[str], label: str) -> dict:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be an object")
-    if value.keys() - allowed:
-        raise ValueError(f"{label} has unsupported fields: {sorted(value.keys() - allowed)}")
-    if required - value.keys():
-        raise ValueError(f"{label} requires: {sorted(required - value.keys())}")
-    return value
-
-
-def _integer(value: Any, label: str, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
-    return value
-
-
-def _text(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a nonempty string")
-    return value
-
-
-def _relative_media(value: Any) -> str:
-    value = _text(value, "media")
-    parts = urlsplit(value)
-    if (
-        parts.scheme
-        or parts.netloc
-        or parts.query
-        or parts.fragment
-        or value.startswith("/")
-        or "\\" in value
-        or any(p in ("", ".", "..") or any(c in '<>:"|?*' for c in p) for p in value.split("/"))
-        or "%" in value
-        or any(ord(c) < 32 for c in value)
-    ):
-        raise ValueError("media must be a portable relative path without traversal or URL escapes")
-    return value
+from dcc_mcp_capcut.editplan import relative_media as _relative_media
+from dcc_mcp_capcut.editplan import require_fps
+from dcc_mcp_capcut.editplan import require_integer as _integer
+from dcc_mcp_capcut.editplan import require_object as _object
+from dcc_mcp_capcut.editplan import require_text as _text
 
 
 def export_otio(timeline: dict[str, Any]) -> dict[str, Any]:
@@ -69,14 +38,7 @@ def export_otio(timeline: dict[str, Any]) -> dict[str, Any]:
         "timeline",
     )
     name = _text(timeline["name"], "name")
-    fps = timeline["fps"]
-    if (
-        isinstance(fps, bool)
-        or not isinstance(fps, (int, float))
-        or not math.isfinite(fps)
-        or fps <= 0
-    ):
-        raise ValueError("fps must be finite and positive")
+    fps = require_fps(timeline["fps"])
     duration = _integer(timeline["duration_frames"], "duration_frames", 1)
     width = _integer(timeline["width"], "width", 1)
     height = _integer(timeline["height"], "height", 1)

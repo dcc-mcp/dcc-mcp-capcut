@@ -1,8 +1,15 @@
 # Portable editorial interchange
 
-`export_otio` accepts an explicit edit decision list. It uses the official
-OpenTimelineIO library, requires the `interchange` extra, and never invokes a
-CapCut host API. The typed tool returns `otio_json`, `duration_frames`, `fps`,
+`export_otio` accepts an explicit edit decision list, or a canonical edit plan
+which it lowers to one. It uses the official OpenTimelineIO library, requires
+the `interchange` extra, and never invokes a CapCut host API.
+
+This EDL shape is the **portable interchange** format. The authoritative plan
+document is [`dcc-mcp-capcut/edit-plan/v1`](edit-plan.md); `export_otio`,
+`import_otio` and `apply_edit_plan` are all its consumers and share its rules,
+so a plan that compiles is a plan this exporter accepts. See
+[ADR 0002](adr/0002-canonical-edit-plan-and-assembly.md) for why the two
+formats were unified. The typed tool returns `otio_json`, `duration_frames`, `fps`,
 `clip_count`, `media_paths`, and explicit `limitations`; saving and packaging
 the returned JSON is the caller's responsibility.
 
@@ -67,3 +74,8 @@ not overwrite an existing file. It does not create parent directories.
 Import availability differs by editor and installed adapters. A successful
 official-library round trip verifies OTIO structure, not native application
 acceptance or reconstruction of proprietary CapCut effects.
+
+`import_otio` is this adapter's own import direction: it reads OTIO JSON (or a
+`.otio` file) back into a canonical edit plan. Timings, trims, gaps, track
+structure and caption markers survive; advisory presentation fields are not
+representable in OTIO and are reported as dropped rather than reconstructed.

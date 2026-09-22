@@ -30,7 +30,7 @@ is unavailable. It is never reported as an empty transcript.
 | --- | --- |
 | `<media>` | Absolute path to the media file, as `argv[1]`. |
 | `--language <code>` | Present only when the caller supplied one, e.g. `zh-CN`. A hint, not a constraint -- ignore it if your engine detects language itself. |
-| `--format <srt|json>` | Always present. Which of the two output shapes to write. |
+| `--format <srt\|json>` | Always present. Which of the two output shapes to write. |
 
 The adapter invokes this as an **argv list with `shell=False`**. Nothing you
 receive is interpreted by a shell, so paths with spaces arrive intact and there

@@ -20,7 +20,6 @@ from dcc_mcp_core.skill import skill_entry, skill_success
 
 from dcc_mcp_capcut import asr
 from dcc_mcp_capcut.editplan import cues_to_captions
-from dcc_mcp_capcut.subtitles import parse_cues
 
 
 @skill_entry
@@ -58,13 +57,14 @@ def main(
         "duration": transcript.duration,
     }
 
-    # Cues are the one shape every downstream link understands: SRT for an
-    # import, canonical captions for a plan. Both are derived from the same
-    # parsed result, so they cannot disagree about where a segment sits.
-    cues = parse_cues(transcript.srt, "srt")
+    # Cues come from the normalised transcript itself, not from re-parsing the
+    # rendered SRT: a segment with empty text renders a block with no text
+    # line, which the parser rejects, so round-tripping would turn a successful
+    # transcription into a parser error about output the caller never supplied.
+    # Deriving both from one source also means they cannot disagree.
     payload["srt"] = transcript.srt
     if fps is not None:
-        payload["captions"] = cues_to_captions(cues, fps)
+        payload["captions"] = cues_to_captions(transcript.cues, fps)
         payload["fps"] = float(fps)
 
     if output_path:

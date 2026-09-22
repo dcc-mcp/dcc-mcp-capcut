@@ -454,3 +454,64 @@ def test_the_contract_survives_the_python_the_tests_run_on(write_executor, media
     )
     assert asr.transcribe(str(media), executor=str(executor)).segments[0].text == "first line"
     assert Path(sys.executable).is_file()
+
+
+# ---------------------------------------------------------------------------
+# Regressions: a transcript must not be re-parsed from its own rendering
+# ---------------------------------------------------------------------------
+
+
+def test_an_empty_text_segment_still_transcribes(monkeypatch, write_executor, media):
+    """An empty segment renders an SRT block with no text line; re-parsing that
+    block rejects it, so a successful transcription must not round-trip."""
+    payload = '{"segments": [{"start": 0.0, "end": 1.0, "text": ""}]}'
+    executor = write_executor(f"print({payload!r})")
+    configure(monkeypatch, executor)
+
+    transcript = asr.transcribe(str(media), output_format="json")
+
+    assert len(transcript.segments) == 1
+    assert transcript.segments[0].text == ""
+    # transcript.cues is the normalised source; transcript.srt is the rendering.
+    assert transcript.cues[0].text == ""
+
+
+def test_transcribe_reports_captions_for_an_empty_text_segment(monkeypatch, write_executor, media):
+    """The skill derives captions from the transcript, never from its own SRT."""
+    import importlib.util
+
+    payload = '{"segments": [{"start": 0.0, "end": 1.0, "text": ""}]}'
+    executor = write_executor(f"print({payload!r})")
+    monkeypatch.setenv(asr.ASR_EXECUTOR_ENV, str(executor))
+
+    spec = importlib.util.spec_from_file_location(
+        "transcribe_skill",
+        Path(__file__).parents[1]
+        / "src"
+        / "dcc_mcp_capcut"
+        / "skills"
+        / "capcut-asr"
+        / "scripts"
+        / "transcribe.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    result = module.main(media=str(media), output_format="json", fps=30)
+
+    assert result["success"] is True
+    assert result["context"]["captions"] == [{"text": "", "start": 0, "duration": 30}]
+
+
+def test_a_segment_text_with_a_blank_line_survives_transcription(
+    monkeypatch, write_executor, media
+):
+    """A blank line would split one cue into two blocks on re-parse."""
+    payload = '{"segments": [{"start": 0.0, "end": 1.0, "text": "one\\n\\ntwo"}]}'
+    executor = write_executor(f"print({payload!r})")
+    configure(monkeypatch, executor)
+
+    transcript = asr.transcribe(str(media), output_format="json")
+
+    assert len(transcript.segments) == 1
+    assert transcript.cues[0].text == "one\n\ntwo"

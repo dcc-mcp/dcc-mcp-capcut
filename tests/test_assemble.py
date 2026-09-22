@@ -518,3 +518,91 @@ def test_the_composed_walk_leaves_a_timecode_subtitle_untouched(skill, recipe, m
     assert imports[0]["path"] == str(media_dir / "galaxy_zh.srt")
     # Nothing was written next to the delivery root's files.
     assert sorted(path.name for path in media_dir.iterdir()) == ["assets", "galaxy_zh.srt"]
+
+
+# ---------------------------------------------------------------------------
+# Regressions: alignment must never reach the host batch action
+# ---------------------------------------------------------------------------
+
+
+def test_the_host_strategy_never_receives_an_unresolved_align(skill, recipe, media_dir):
+    """`auto` is the default and tries the host first, so the host path is the
+    one that would have leaked the directive.
+
+    A permissive host would have imported the unaligned source and reported
+    success -- the exact failure mode resolving offline exists to prevent.
+    """
+
+    (media_dir / "galaxy_zh.srt").write_text(
+        "1\n00:00:00,600 --> 00:00:02,300\nfirst\n\n2\n00:00:03,000 --> 00:00:05,000\nsecond\n",
+        encoding="utf-8",
+    )
+    recipe.pop("subtitle_file", None)
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+    plan.pop("subtitles")
+    plan["subtitles"] = [
+        {"file": "galaxy_zh.srt", "align": "sequence", "output_path": "out/aligned.srt"}
+    ]
+    batch_host(skill)
+
+    context = ok(skill.main(plan=plan, media_dir=str(media_dir), strategy="host"))
+
+    assert context["strategy"] == "host"
+    body = skill.calls[0][1]
+    # The plan the host receives carries no adapter-side directives.
+    for subtitle in body["plan"]["subtitles"]:
+        assert "align" not in subtitle
+        assert "output_path" not in subtitle
+    # Nor does the script it may execute directly.
+    steps = [s for s in body["script"]["actions"] if s["action"] == "import_subtitles"]
+    assert steps[0]["params"]["path"] == str(media_dir / "out" / "aligned.srt")
+    assert "align" not in steps[0]["params"]
+    assert "output_path" not in steps[0]["params"]
+    assert (media_dir / "out" / "aligned.srt").is_file()
+
+
+def test_dry_run_reports_alignment_without_writing_anything(skill, recipe, media_dir):
+    """Resolving alignment writes a file, so a dry run must not resolve it."""
+
+    (media_dir / "galaxy_zh.srt").write_text(
+        "1\n00:00:00,600 --> 00:00:02,300\nfirst\n\n2\n00:00:03,000 --> 00:00:05,000\nsecond\n",
+        encoding="utf-8",
+    )
+    recipe.pop("subtitle_file", None)
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+    plan.pop("subtitles")
+    plan["subtitles"] = [
+        {"file": "galaxy_zh.srt", "align": "sequence", "output_path": "out/aligned.srt"}
+    ]
+    skill.respond(lambda action, params: {})
+
+    context = ok(skill.main(plan=plan, media_dir=str(media_dir), dry_run=True))
+
+    assert context["dispatched"] is False
+    assert not (media_dir / "out").exists(), "a dry run must not write"
+    # The script is still the host-free description, directives included.
+    steps = [s for s in context["script"]["actions"] if s["action"] == "import_subtitles"]
+    assert steps[0]["params"]["align"] == "sequence"
+
+
+def test_auto_strategy_resolves_alignment_before_the_host_call(skill, recipe, media_dir):
+    """`auto` is the default; this is the path a user actually gets."""
+
+    (media_dir / "galaxy_zh.srt").write_text(
+        "1\n00:00:00,600 --> 00:00:02,300\nfirst\n\n2\n00:00:03,000 --> 00:00:05,000\nsecond\n",
+        encoding="utf-8",
+    )
+    recipe.pop("subtitle_file", None)
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+    plan.pop("subtitles")
+    plan["subtitles"] = [
+        {"file": "galaxy_zh.srt", "align": "sequence", "output_path": "out/aligned.srt"}
+    ]
+    batch_host(skill)
+
+    context = ok(skill.main(plan=plan, media_dir=str(media_dir)))
+
+    assert context["strategy"] == "host"
+    body = skill.calls[0][1]
+    steps = [s for s in body["script"]["actions"] if s["action"] == "import_subtitles"]
+    assert steps[0]["params"]["path"] == str(media_dir / "out" / "aligned.srt")

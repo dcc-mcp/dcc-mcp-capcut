@@ -372,3 +372,77 @@ def test_batch_carries_the_last_timeline_readback(bridge, tmp_path):
     assert verification["ok"] is True
     assert verification["timeline"] == {"tracks": 3}
     assert verification["steps"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Regressions: alignment must be resolved before any dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_batch_resolves_alignment_for_every_item_before_dispatch(bridge, tmp_path):
+    """A file that cannot be re-timed must fail before item 0 lands on the timeline.
+
+    Resolving alignment lazily meant item 1 raising FileNotFoundError after item
+    0 was already imported, with no "Items already imported" to show for it.
+    """
+    first = tmp_path / "first.srt"
+    first.write_text(SRT_ZH, encoding="utf-8")
+    skill = bridge("import_subtitles_batch")
+    skill["respond"](lambda action, params: ok_result(["cap1"]))
+
+    result = skill["module"].main(
+        items=[
+            {"path": str(first), "align": "sequence"},
+            {"path": str(tmp_path / "absent.srt"), "align": "sequence"},
+        ]
+    )
+
+    assert result["success"] is False
+    assert not skill["calls"], "nothing may be imported when a later item cannot be resolved"
+
+
+def test_batch_rejects_an_unalignable_format_before_any_dispatch(bridge, tmp_path):
+    first = tmp_path / "first.srt"
+    first.write_text(SRT_ZH, encoding="utf-8")
+    ass = tmp_path / "second.ass"
+    ass.write_text("[Script Info]\nDialogue: 0,0:00:01.00,0:00:02.00\n", encoding="utf-8")
+    skill = bridge("import_subtitles_batch")
+    skill["respond"](lambda action, params: ok_result(["cap1"]))
+
+    result = skill["module"].main(
+        items=[
+            {"path": str(first), "align": "sequence"},
+            {"path": str(ass), "format": "ass", "align": "sequence"},
+        ]
+    )
+
+    assert result["success"] is False
+    assert "offline subtitle parsing supports" in result["message"]
+    assert not skill["calls"]
+
+
+def test_batch_reports_progress_when_a_dispatch_itself_fails(bridge, tmp_path):
+    """The failure path that *is* inside the loop still names what landed."""
+    first = tmp_path / "first.srt"
+    second = tmp_path / "second.srt"
+    first.write_text(SRT_ZH, encoding="utf-8")
+    second.write_text(SRT_EN, encoding="utf-8")
+    skill = bridge("import_subtitles_batch")
+
+    def handler(action, params):
+        # Alignment rewrites the paths, so match on the stem, not the filename.
+        if Path(params["path"]).stem.startswith("second"):
+            raise RuntimeError("CapCut bridge did not respond; open the bundled panel")
+        return ok_result(["cap1"])
+
+    skill["respond"](handler)
+    result = skill["module"].main(
+        items=[
+            {"path": str(first), "align": "sequence"},
+            {"path": str(second), "align": "sequence"},
+        ]
+    )
+
+    assert result["success"] is False
+    assert "stopped at item 1" in result["message"]
+    assert "Items already imported" in result["message"]

@@ -49,17 +49,23 @@ def main(items: list, timeline_id: str = None):
     if not isinstance(items, list) or not items:
         raise ValueError("items must be a non-empty list of subtitle requests")
 
-    # Validate every item before the first dispatch. Checking lazily would let
-    # item 3 being malformed surface only after items 1 and 2 were already
-    # imported -- and since the host is not rolled back, the caller would be
-    # left with a half-populated timeline and an error about a file it never
-    # got to. The whole point of a batch call is that it is one unit of work.
+    # Validate *and* resolve every item before the first dispatch. Checking
+    # lazily would let item 3 being malformed surface only after items 1 and 2
+    # were already imported -- and since the host is not rolled back, the
+    # caller would be left with a half-populated timeline and an error about a
+    # file it never got to. Resolving alignment here matters for the same
+    # reason: it reads and rewrites the source file, so a path that cannot be
+    # re-timed must fail before item 0 lands, not after it.
+    #
+    # The whole point of a batch call is that it is one unit of work.
+    dispatches = []
     requests = []
     for index, entry in enumerate(items):
         request = _validate_item(entry, index)
         if timeline_id is not None:
             request["timeline_id"] = timeline_id
         requests.append(request)
+        dispatches.append(prepare_import_params(request))
 
     imported: list[dict[str, Any]] = []
     caption_ids: list[str] = []
@@ -67,7 +73,7 @@ def main(items: list, timeline_id: str = None):
     readback_from: str | None = None
 
     for index, request in enumerate(requests):
-        dispatched = prepare_import_params(request)
+        dispatched = dispatches[index]
         try:
             result = validate_host_result(
                 "import_subtitles", call_bridge("import_subtitles", dispatched)

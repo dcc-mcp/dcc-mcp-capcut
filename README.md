@@ -5,6 +5,25 @@ so this adapter uses a localhost, token-authenticated bridge and a bundled
 CapCut-side panel. MCP calls remain typed and auditable; the panel is the only
 component allowed to invoke CapCut host APIs.
 
+## Host platforms
+
+Host binding is dispatched through a platform provider rather than hard-coded
+Windows paths:
+
+| Platform | Discovery | Install plan | Doctor `capcut_executable` |
+| --- | --- | --- | --- |
+| Windows | `CapCut.exe` / `JianyingPro.exe` under `%LOCALAPPDATA%\<app>\Apps` and `%PROGRAMFILES%\<app>` | exact `winget install` command | `ok` / `fail` |
+| macOS | `CapCut.app` / `JianyingPro.app` under `/Applications` and `~/Applications`, with the `Info.plist` bundle version | `brew install --cask capcut`, or the official download page where no cask exists | `ok` / `fail` |
+| Linux | none | none; `status: unsupported` with the reason | `skip`, reported as `unsupported` |
+
+ByteDance publishes no official Linux client, so Linux reports an explicit
+conclusion instead of an empty "not installed" that could be mistaken for a
+broken install. macOS window binding needs **Accessibility permission** for the
+controlling app (System Settings > Privacy & Security > Accessibility) — a
+user-side grant the adapter reports but never requests or bypasses. No provider
+installs anything: every plan still goes through the operator-owned
+`ui_control__system_operation` grant.
+
 ## Capabilities
 
 The bundled skills cover project lifecycle/settings, media import/relink and
@@ -96,7 +115,10 @@ dcc-mcp-capcut-doctor --json      # machine-readable report
 It checks the Python version, `dcc_mcp_core` against the CI-verified floor, the
 runtime bundle handshake, the CapCut executable, `dcc-cua` availability and
 window uniqueness, the bridge port and token, the bundled panel payload, the
-optional Qt probe configuration, and `opentimelineio`.
+optional Qt probe configuration, and `opentimelineio`. The executable and
+window checks run through the platform provider, so macOS gets real host
+verdicts and Linux gets an explicit `unsupported` reason. The report names the
+provider in `host_provider`.
 
 Every check is `ok`, `warn` (the adapter still starts, but degraded or with an
 optional feature disabled), `fail` (the adapter cannot start in this state), or

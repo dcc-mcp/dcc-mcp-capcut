@@ -46,8 +46,9 @@ from pathlib import Path
 from typing import Any
 
 from .__version__ import __version__
-from .bootstrap import CapCutBindingError, flavor_by_exe, select_capcut_window
-from .installer import WINGET_COMMAND, detect_installation, verify_installation
+from .bootstrap import CapCutBindingError, select_capcut_window
+from .hosts import get_provider
+from .installer import verify_installation
 
 OK = "ok"
 WARN = "warn"
@@ -243,28 +244,21 @@ def check_runtime() -> Check:
 
 
 def check_capcut_executable() -> Check:
-    detection = detect_installation()
-    if detection["installed"]:
-        return Check(
-            "capcut_executable",
-            OK,
-            f"found {detection['executable']}",
-            detection,
-        )
-    if os.name != "nt":
-        return Check(
-            "capcut_executable",
-            SKIP,
-            f"CapCut Desktop discovery is Windows-only; skipped on {os.name}",
-            detection,
-            hint="Run the adapter on the Windows host that owns the CapCut window, and doctor it there.",
-        )
+    """Grade installation evidence through the platform provider.
+
+    Windows keeps its original verdicts. macOS reports the discovered
+    application bundle and its version instead of pretending the host does not
+    exist, and Linux reports an explicit ``unsupported`` conclusion with the
+    reason rather than an empty "not installed".
+    """
+    provider = get_provider()
+    verdict = provider.check_executable()
     return Check(
         "capcut_executable",
-        FAIL,
-        "no CapCut executable found",
-        detection,
-        hint=f"Install CapCut Desktop with the operator-confirmed plan: {WINGET_COMMAND}",
+        verdict["status"],
+        verdict["summary"],
+        verdict["detail"],
+        verdict["hint"],
     )
 
 
@@ -284,23 +278,43 @@ def _dcc_cua_inventory(timeout: float = DCC_CUA_TIMEOUT) -> list[dict[str, Any]]
 
 
 def check_dcc_cua() -> Check:
-    if os.name != "nt":
+    """Probe the window inventory through the platform provider.
+
+    Windows: a missing CLI is a failed prerequisite. macOS: window binding is a
+    real path but still being validated, and it needs user-granted Accessibility
+    permission, so an absent CLI degrades to a warning instead of a failure.
+    Linux: no official client exists, so no inventory is attempted at all.
+    """
+    provider = get_provider()
+    if provider.window_inventory == "unsupported":
         return Check(
             "dcc_cua",
             SKIP,
-            f"CapCut window discovery is Windows-only; skipped on {os.name}",
-            {},
-            hint="Run the adapter on the Windows host that owns the CapCut window, and doctor it there.",
+            f"CapCut window binding is unsupported on {provider.label}",
+            {
+                "installed": False,
+                "platform": provider.name,
+                "reason": provider.unsupported_reason,
+            },
+            hint=provider.window_binding_hint(inventory_unavailable=True),
         )
     try:
         inventory = _dcc_cua_inventory()
     except FileNotFoundError:
+        if provider.window_inventory == "degraded":
+            return Check(
+                "dcc_cua",
+                WARN,
+                "dcc-cua is not installed or not on PATH; window binding is unverified",
+                {"installed": False, "platform": provider.name},
+                hint=provider.window_binding_hint(inventory_unavailable=True),
+            )
         return Check(
             "dcc_cua",
             FAIL,
             "dcc-cua is not installed or not on PATH",
             {"installed": False},
-            hint="Install dcc-cua (the project-owned window inventory CLI) and make it resolvable on PATH.",
+            hint=provider.window_binding_hint(inventory_unavailable=True),
         )
     except subprocess.TimeoutExpired:
         return Check(
@@ -327,7 +341,9 @@ def check_dcc_cua() -> Check:
             hint="Reinstall dcc-cua so 'dcc-cua list' emits a JSON array of windows.",
         )
     capcut_windows = [
-        window for window in inventory if flavor_by_exe(window.get("app_name", "")) is not None
+        window
+        for window in inventory
+        if provider.flavor_by_app_name(window.get("app_name", "")) is not None
     ]
     try:
         binding = select_capcut_window(inventory)
@@ -336,7 +352,7 @@ def check_dcc_cua() -> Check:
         hint = (
             "Leave exactly one visible CapCut main window: close the other CapCut windows."
             if "multiple" in message
-            else "Launch CapCut Desktop and leave its main window visible and restored (not minimized)."
+            else provider.window_binding_hint(inventory_unavailable=False)
         )
         return Check(
             "dcc_cua",
@@ -529,6 +545,9 @@ class Report:
     checks: tuple[Check, ...]
     python_version: str = field(default_factory=_python_version)
     platform: str = field(default_factory=lambda: os.name)
+    # Which platform provider produced the host checks, so a report from a
+    # machine the operator did not expect is self-describing.
+    host_provider: str = field(default_factory=lambda: get_provider().name)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -555,6 +574,7 @@ class Report:
             "version": __version__,
             "python": self.python_version,
             "platform": self.platform,
+            "host_provider": self.host_provider,
             "ok": self.ok,
             "exit_code": self.exit_code,
             "counts": self.counts,

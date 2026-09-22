@@ -19,6 +19,24 @@ MCP client -> dcc-mcp-capcut (typed tools) -> loopback bridge -> bundled panel -
 - No MCP tool exposes raw script execution, an arbitrary shell, or a generic
   computer-automation fallback.
 
+## Host platforms
+
+Host binding is dispatched through a platform provider, not hard-coded Windows
+paths. Windows and macOS are supported; **Linux is explicitly unsupported**
+because ByteDance publishes no official desktop client for it, and the doctor
+says so with a reason instead of reporting an empty "not installed".
+
+| Platform | Discovery | Doctor `capcut_executable` |
+| --- | --- | --- |
+| Windows | `CapCut.exe` / `JianyingPro.exe` install roots | `ok` / `fail` |
+| macOS | `CapCut.app` / `JianyingPro.app` bundles plus their `Info.plist` version | `ok` / `fail` |
+| Linux | none | `skip`, reported as `unsupported` |
+
+macOS window binding additionally needs **Accessibility permission** for the
+controlling app. That is a user-side grant: the adapter reports the requirement
+and never requests, grants or bypasses it. See `host-platforms.md` for the full
+matrix.
+
 ## Consent and side effects
 
 - `install_capcut`, `auto_setup_capcut`, and `configure_environment` are
@@ -87,6 +105,7 @@ CapCut manifest is stale, or when handshake metadata is absent. The plain
 
 ## See also
 
+- `host-platforms.md` — the per-platform support matrix and provider contract.
 - `dependencies-and-notices.md` — third-party licenses and redistribution facts.
 - `export-and-verification.md` — the post-operation readback contract.
 - `troubleshooting.md` — symptom to cause to remediation.

@@ -4,138 +4,58 @@ The adapter never shells out to an installer or edits the registry.  It emits
 an exact, reviewable plan that an operator can approve through the core
 ``ui_control__system_operation`` grant, then verifies the resulting executable
 and bridge configuration.
+
+Every platform assumption lives in :mod:`dcc_mcp_capcut.hosts`. This module is
+the stable public surface: it resolves the provider for the running platform
+and forwards, so a caller written against the Windows behaviour keeps working
+while macOS gains real discovery and Linux gets an explicit ``unsupported``
+verdict instead of a silently empty one.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-PACKAGE_ID = "ByteDance.CapCut"
-WINGET_COMMAND = (
-    "winget install --id ByteDance.CapCut --exact "
-    "--accept-package-agreements --accept-source-agreements"
-)
+from .hosts import PACKAGE_ID, WINDOWS_FLAVORS, WINGET_COMMAND, HostFlavor, get_provider
+from .hosts.windows import WindowsHostFlavor
 
+# The Windows edition table (CapCut + 剪映专业版) is the canonical list of
+# shipped desktop editions and their package ids. Platform-aware code must read
+# `hosts.get_provider().flavors` instead: macOS editions are application bundles
+# with different installation facts and no Windows executable name.
+HOST_FLAVORS = WINDOWS_FLAVORS
+DEFAULT_FLAVOR = WINDOWS_FLAVORS[0]
 
-@dataclass(frozen=True)
-class HostFlavor:
-    """One shipped desktop edition of the ByteDance editor.
-
-    ByteDance publishes two desktop builds of the same product line: CapCut for
-    international channels and 剪映专业版 (JianyingPro) for the China channel.
-    Both ship the same two-level launcher layout, so one root table covers
-    both: a per-user ``<app_dir>\\Apps\\<exe>`` install used by current
-    releases, and an older machine-wide ``<app_dir>\\<exe>`` install.
-    """
-
-    name: str
-    app_dir: str
-    exe: str
-    package_id: str
-    # Verified title of the main window, or None when the executable name alone
-    # identifies the flavour. JianyingPro main-window titles are localised and
-    # vary by release, so they are deliberately not pinned here.
-    window_title: str | None = None
-
-    def winget_command(self) -> str:
-        return (
-            f"winget install --id {self.package_id} --exact "
-            "--accept-package-agreements --accept-source-agreements"
-        )
-
-    def candidate_paths(self) -> list[Path]:
-        roots = [
-            Path(os.environ.get("LOCALAPPDATA", "")) / self.app_dir / "Apps",
-            Path(os.environ.get("PROGRAMFILES", "")) / self.app_dir,
-            Path(os.environ.get("PROGRAMFILES(X86)", "")) / self.app_dir,
-        ]
-        return [root / self.exe for root in roots if str(root) not in {".", ""}]
-
-
-HOST_FLAVORS: tuple[HostFlavor, ...] = (
-    HostFlavor(
-        name="capcut",
-        app_dir="CapCut",
-        exe="CapCut.exe",
-        package_id=PACKAGE_ID,
-        window_title="CapCut",
-    ),
-    HostFlavor(
-        name="jianyingpro",
-        app_dir="JianyingPro",
-        exe="JianyingPro.exe",
-        package_id="ByteDance.JianyingPro",
-    ),
-)
-
-DEFAULT_FLAVOR = HOST_FLAVORS[0]
-
-
-def _candidate_paths() -> list[Path]:
-    candidates: list[Path] = []
-    for flavor in HOST_FLAVORS:
-        candidates.extend(flavor.candidate_paths())
-    return candidates
+__all__ = [
+    "DEFAULT_FLAVOR",
+    "HOST_FLAVORS",
+    "PACKAGE_ID",
+    "WINGET_COMMAND",
+    "HostFlavor",
+    "WindowsHostFlavor",
+    "detect_installation",
+    "installation_plan",
+    "verify_installation",
+]
 
 
 def detect_installation() -> dict[str, Any]:
-    """Return deterministic, read-only installation evidence."""
-    candidates = _candidate_paths()
-    found: tuple[HostFlavor, Path] | None = None
-    for flavor in HOST_FLAVORS:
-        hit = next((path for path in flavor.candidate_paths() if path.is_file()), None)
-        if hit is not None:
-            found = (flavor, hit)
-            break
-    flavor, executable = found if found else (DEFAULT_FLAVOR, None)
-    return {
-        "installed": executable is not None,
-        "executable": str(executable) if executable else None,
-        "flavor": flavor.name,
-        "candidates_checked": [str(path) for path in candidates],
-        "package_id": flavor.package_id,
-        "platform": os.name,
-    }
+    """Return deterministic, read-only installation evidence for this platform."""
+    return get_provider().detect_installation()
 
 
 def installation_plan() -> dict[str, Any]:
-    """Build an operator-facing install/configure/verify plan."""
-    detection = detect_installation()
-    return {
-        "status": "installed" if detection["installed"] else "missing",
-        "detection": detection,
-        "installer": {
-            "provider": "winget",
-            "package_id": PACKAGE_ID,
-            "command": WINGET_COMMAND,
-            "requires_operator_confirmation": True,
-            "scope": "current_user_or_operator_selected",
-        },
-        "environment": {
-            "DCC_MCP_CAPCUT_BRIDGE_PORT": os.environ.get("DCC_MCP_CAPCUT_BRIDGE_PORT", "47410"),
-            "DCC_MCP_CAPCUT_BRIDGE_TOKEN": "<generate-per-user-secret>",
-            "DCC_MCP_CAPCUT_WINDOW_TITLE": "CapCut",
-            "DCC_MCP_CAPCUT_INSTANCE_TYPE": "gui",
-        },
-        "post_install": [
-            "Launch CapCut Desktop once and complete any first-run prompts manually.",
-            "Install/load the bundled dcc-mcp-capcut panel.",
-            "Verify bridge /health and exact CapCut PID/HWND through dcc-cua.",
-            "Run inspect_project before any mutation.",
-        ],
-        "next_step": "Call ui_control__system_operation with the operator-owned grant, then verify_installation.",
-    }
+    """Build an operator-facing install/configure/verify plan for this platform."""
+    return get_provider().installation_plan()
 
 
 def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
     """Verify the executable, exact host binding, broker, and panel lease."""
-    evidence = detect_installation()
+    evidence = dict(detect_installation())
     bridge_url = os.environ.get("DCC_MCP_CAPCUT_BRIDGE_URL", "http://127.0.0.1:47410").rstrip("/")
     token = os.environ.get("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "")
     pid = _positive_int(os.environ.get("DCC_MCP_CAPCUT_PID"))

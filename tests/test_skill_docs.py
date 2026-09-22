@@ -30,6 +30,7 @@ REFERENCE_FILES = (
     "dependencies-and-notices.md",
     "export-and-verification.md",
     "host-boundary.md",
+    "host-platforms.md",
     "troubleshooting.md",
 )
 

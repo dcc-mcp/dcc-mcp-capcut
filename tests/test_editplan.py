@@ -465,6 +465,72 @@ def test_a_missing_subtitle_file_is_checked_with_the_media(recipe, tmp_path):
     ] == str(tmp_path / "galaxy_zh.srt")
 
 
+def test_subtitle_file_must_be_a_portable_relative_path(plan):
+    """The existence check is not a substitute for the path rule.
+
+    ``plan_to_actions`` resolves the subtitle with ``Path(media_dir) / file`` and
+    pathlib keeps an absolute path as-is, so an absolute value would escape the
+    delivery root entirely -- and the recipe entry point already rejects that
+    same value. One field, one verdict: the recipe side goes through
+    ``relative_media``, so this side has to as well.
+    """
+    for bad in (
+        "C:/Windows/win.ini",
+        "/etc/hostname",
+        "../secrets.srt",
+        "https://host/subs.srt",
+        "subs/%2e%2e/secrets.srt",
+    ):
+        broken = copy.deepcopy(plan)
+        broken["subtitle"] = {"file": bad}
+        with pytest.raises(ValueError, match="media must be a portable relative path"):
+            normalize_plan(broken)
+
+    broken = copy.deepcopy(plan)
+    broken["subtitle"] = {"file": "galaxy_zh.srt"}
+    assert normalize_plan(broken)["subtitle"]["file"] == "galaxy_zh.srt"
+
+
+def test_subtitle_cannot_escape_the_delivery_root(plan, tmp_path):
+    """End to end: an absolute subtitle can no longer reach the host."""
+    (tmp_path / "media").mkdir()
+    for name in ("opening.mp4", "second.mp4", "bed.wav"):
+        (tmp_path / "media" / name).write_bytes(b"")
+    (tmp_path / "galaxy_zh.srt").write_bytes(b"")
+
+    with_subtitles = copy.deepcopy(plan)
+    with_subtitles["subtitle"] = {"file": "galaxy_zh.srt"}
+    steps = plan_to_actions(with_subtitles, media_dir=str(tmp_path))["actions"]
+    assert [step for step in steps if step["action"] == "import_subtitles"][0]["params"][
+        "path"
+    ] == str(tmp_path / "galaxy_zh.srt")
+
+    escaped = copy.deepcopy(plan)
+    escaped["subtitle"] = {"file": "C:/Windows/win.ini"}
+    with pytest.raises(ValueError, match="media must be a portable relative path"):
+        plan_to_actions(escaped, media_dir=str(tmp_path))
+
+
+def test_the_real_demo_directory_matches_the_documented_layout():
+    """Guard the repo layout the README and ADR instruct, without downloading.
+
+    The delivery root is ``demo/`` because the plan's portable paths are
+    ``assets/<media>`` and ``galaxy_zh.srt``. This asserts those pieces exist in
+    the repo as checked in, so a layout change cannot silently break the hand-off.
+    """
+    demo = ROOT / "demo"
+    assert (demo / "galaxy_zh.srt").is_file(), "the subtitle the recipe references is gone"
+    assert (demo / "vlog_recipe.json").is_file()
+    assert (demo / "assets.json").is_file()
+
+    catalog = json.loads((demo / "assets.json").read_text(encoding="utf-8"))
+    for asset in catalog["assets"]:
+        assert asset["local_path"].startswith("assets/"), (
+            f"{asset['id']} escaped the delivery root; media_dir=demo would no longer "
+            f"resolve it: {asset['local_path']}"
+        )
+
+
 def test_referenced_lists_every_file_a_dispatch_needs(recipe):
     plan = compile_plan(recipe, media_index=MEDIA_INDEX)
 

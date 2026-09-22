@@ -77,8 +77,9 @@ error that triggers the fallback; everything else is a real failure.
 | `track '...': clips overlap at frame N` | Two clips in one track overlap. | Move the later clip to a separate picture track; overlays are legal across tracks, never within one. |
 | `clip '...' exceeds media duration` | `source_in + duration` runs past `media_duration`. | Correct the trim or supply the true `media_duration`. |
 | `apply_edit_plan stopped at step N (<action>): ...` | The composed walk failed part-way. | Read `Steps already applied`; the host is **not** rolled back, so inspect the project before retrying. |
-| `import_media returned N ids for M requested paths` | The host did not report one id per path. | Reconcile with `list_media` (see `capcut-media`) before placing clips. |
-| `completed but no step returned a timeline readback` | The host acknowledged without proof. | Fix the host integration; the adapter refuses to claim success. |
+| `CapCut action 'import_media' did not return media_id` | The host acknowledged an import without a stable id. | Fix the host integration per `capcut_panel/HOST_API.md`. |
+| `import_media returned no media_id for a step that needs one` | Same cause, raised by the assembly walk. | Same fix; the adapter will not guess a media mapping. |
+| `apply_edit_plan completed but no step returned a timeline readback` | The host acknowledged without proof. | Fix the host integration; the adapter refuses to claim success. |
 | `strategy: "host"` fails with an unsupported-action error | The host build has no batch action. | Use `auto` or `composed`. |
 
 ## Acceptance

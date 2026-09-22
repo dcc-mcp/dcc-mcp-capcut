@@ -107,7 +107,17 @@ def _run_composed(script: dict[str, Any]) -> dict[str, Any]:
 def _run_host(plan: dict[str, Any], script: dict[str, Any], media_dir: str) -> dict[str, Any]:
     payload = {"plan": plan, "media_dir": media_dir, "script": script}
     result = validate_host_result("apply_edit_plan", call_bridge("apply_edit_plan", payload))
-    return {**result, "executed": ["apply_edit_plan"]}
+    # Only the fields the contract guarantees are spread into the tool result.
+    # The rest of the receipt is nested: a host is free to echo back the `plan`
+    # or `script` it received, and spreading that straight into the result would
+    # collide with the summary keys and raise TypeError -- reporting a failure
+    # for an assembly that actually succeeded.
+    return {
+        "timeline_id": result.get("timeline_id"),
+        "verification": result["verification"],
+        "host_result": result,
+        "executed": ["apply_edit_plan"],
+    }
 
 
 @skill_entry

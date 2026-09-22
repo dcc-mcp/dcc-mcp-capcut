@@ -231,6 +231,37 @@ def test_unknown_strategy_is_rejected(skill, recipe, media_dir):
 # ---------------------------------------------------------------------------
 
 
+def test_a_host_echoing_the_payload_does_not_break_the_result(skill, recipe, media_dir):
+    """The host receipt must not be spread straight into the tool result.
+
+    A host is free to echo back the ``plan`` or ``script`` it received. Those are
+    also keys in the adapter's own summary, so spreading the receipt would raise
+    ``TypeError: got multiple values for keyword argument`` and return a failure
+    envelope for an assembly that actually succeeded. Latent today: ``auto`` only
+    reaches this branch once a host implements the batch action.
+    """
+
+    def handle(action, params):
+        assert action == "apply_edit_plan"
+        return host_result(
+            timeline_id="tl-7",
+            plan=params["plan"],
+            script=params["script"],
+            echoed="anything",
+        )
+
+    skill.respond(handle)
+
+    context = ok(skill.main(recipe=recipe, media_index=MEDIA_INDEX, media_dir=str(media_dir)))
+
+    assert context["strategy"] == "host"
+    assert context["timeline_id"] == "tl-7"
+    assert context["verification"]["ok"] is True
+    # The adapter's own keys survive, and the full receipt is still reachable.
+    assert context["plan"]["duration_frames"] == 375
+    assert context["host_result"]["echoed"] == "anything"
+
+
 def test_marker_alone_does_not_trigger_a_fallback(skill, recipe, media_dir):
     """Only a rejection naming *this* action means "not implemented".
 

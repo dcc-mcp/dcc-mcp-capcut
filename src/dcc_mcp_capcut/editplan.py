@@ -337,7 +337,12 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
         if fmt is not None and fmt not in SUBTITLE_FORMATS:
             raise ValueError(f"subtitle format must be one of {list(SUBTITLE_FORMATS)}")
         normalized["subtitle"] = {
-            "file": require_text(subtitle["file"], "subtitle file"),
+            # Same portable-path rule as clip media, enforced on this entry point
+            # too. An absolute path would be resolved by pathlib as-is and escape
+            # media_dir entirely, which would defeat the delivery-root check and
+            # make the plan non-relocatable -- and the recipe entry point would
+            # reject the very same value.
+            "file": relative_media(subtitle["file"]),
             **{
                 key: value
                 for key, value in (

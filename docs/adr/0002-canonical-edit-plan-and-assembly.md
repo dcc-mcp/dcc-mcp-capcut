@@ -133,7 +133,7 @@ script generation — is fully covered and host-free.
    it and the adapter cannot ship host code. Rejected as the *only* path.
 2. **Make OTIO the canonical form** — it cannot represent CapCut presentation
    (volume, fades, text style), so an assembly path would have to invent
-   metadata. Rejected; OTIO stays the portable * interchange* format and the
+   metadata. Rejected; OTIO stays the portable interchange format and the
    plan stays authoritative.
 3. **Silently split an overlapping picture track into an overlay track** —
    makes every plan "valid" by changing its meaning. Rejected: the contract

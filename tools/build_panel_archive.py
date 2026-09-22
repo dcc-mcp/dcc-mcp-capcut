@@ -92,6 +92,13 @@ def verify_archive(path: Path) -> list[str]:
 
     Returns a list of human-readable problems; an empty list means every member
     is present, covered by the manifest, and matches its recorded digest.
+
+    The manifest format is backward compatible (the original fields are
+    unchanged and new consumers may ignore the digests), but this verifier is
+    *not* forward compatible: an archive built before digests existed carries
+    nothing to check, so it is reported as a problem rather than passed by
+    default. Verifying a historical release artifact therefore means building
+    it again from its tag, not re-checking the published file.
     """
     with ZipFile(path) as archive:
         members = set(archive.namelist())

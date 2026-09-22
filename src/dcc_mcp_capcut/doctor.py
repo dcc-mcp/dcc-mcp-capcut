@@ -175,12 +175,15 @@ def check_core() -> Check:
         return Check(
             "dcc_mcp_core",
             FAIL,
-            f"dcc_mcp_core {installed} is older than the verified floor {MIN_CORE_VERSION}",
+            f"dcc_mcp_core {installed} is older than the declared install floor {MIN_CORE_VERSION}",
             detail,
             hint=f"pip install --upgrade '{requirement}'",
         )
     return Check(
-        "dcc_mcp_core", OK, f"dcc_mcp_core {installed} satisfies the verified floor", detail
+        "dcc_mcp_core",
+        OK,
+        f"dcc_mcp_core {installed} satisfies the declared install floor",
+        detail,
     )
 
 

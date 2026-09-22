@@ -60,6 +60,17 @@ def test_panel_archive_is_deterministic_and_versioned(tmp_path):
         assert set(archive.namelist()) == {MANIFEST_NAME, *PANEL_MEMBERS}
 
 
+def test_sha256_hex_matches_a_known_answer():
+    """A wrong-but-self-consistent hash would pass every round-trip assertion.
+
+    The manifest tests compare `sha256_hex` against itself, so they cannot tell
+    a correct digest from a stable one. Published digests are the contract, and
+    a consumer hashes with a real SHA-256 implementation, so pin known answers.
+    """
+    assert sha256_hex(b"") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert sha256_hex(b"abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
 def test_manifest_digests_match_the_archived_bytes(tmp_path):
     archive_path = tmp_path / "panel.zip"
     build(archive_path, "0.1.0")

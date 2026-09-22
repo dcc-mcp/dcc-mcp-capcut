@@ -229,6 +229,55 @@ def test_linux_plan_states_the_conclusion_instead_of_a_package(pin_platform):
     assert "Windows or macOS" in plan["next_step"]
 
 
+def test_windows_candidates_are_never_relative_when_roots_are_unset(pin_platform, monkeypatch):
+    """An unset install root must not produce a candidate relative to the CWD.
+
+    Appending the install layout before dropping empty roots yielded
+    ``CapCut\\Apps\\CapCut.exe``, which ``is_file()`` could match against a
+    directory in whatever directory the adapter happened to start in.
+    """
+    pin_platform("windows")
+    for name in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"):
+        monkeypatch.delenv(name, raising=False)
+
+    for flavor in HOST_FLAVORS:
+        assert flavor.candidate_paths() == []
+
+
+def test_windows_candidate_layout_is_unchanged(pin_platform, monkeypatch, tmp_path):
+    """The original three candidate roots, in the original order."""
+    pin_platform("windows")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("PROGRAMFILES", str(tmp_path / "pf"))
+    monkeypatch.setenv("PROGRAMFILES(X86)", str(tmp_path / "pf86"))
+
+    assert [str(path) for path in HOST_FLAVORS[0].candidate_paths()] == [
+        str(tmp_path / "local" / "CapCut" / "Apps" / "CapCut.exe"),
+        str(tmp_path / "pf" / "CapCut" / "CapCut.exe"),
+        str(tmp_path / "pf86" / "CapCut" / "CapCut.exe"),
+    ]
+
+
+def test_macos_degrades_on_a_malformed_plist(pin_platform, macos_applications, tmp_path):
+    """A truncated XML plist must not crash discovery.
+
+    XML plists parse through expat, whose ``ExpatError`` is not a
+    ``ValueError``, so it escaped the "version unknown" fallback.
+    """
+    from dcc_mcp_capcut.hosts.macos import _read_bundle_metadata
+
+    pin_platform("macos")
+    bundle = macos_applications("CapCut.app", version=None)
+    (bundle / "Contents" / "Info.plist").write_bytes(
+        b'<?xml version="1.0"?><plist><dict><key>CFBundleShortVersionString</key>'
+    )
+
+    assert _read_bundle_metadata(bundle) == {}
+    from dcc_mcp_capcut.installer import detect_installation
+
+    assert detect_installation()["installed"] is True
+
+
 @pytest.mark.parametrize("platform", [WINDOWS, MACOS, LINUX])
 def test_every_plan_carries_the_bridge_environment_contract(pin_platform, platform):
     pin_platform(platform)

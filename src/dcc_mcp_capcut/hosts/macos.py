@@ -18,6 +18,7 @@ import os
 import plistlib
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 from .base import HostProvider
 from .flavors import HostFlavor, _existing
@@ -90,7 +91,9 @@ def _read_bundle_metadata(bundle: Path) -> dict[str, Any]:
     try:
         with plist.open("rb") as handle:
             info = plistlib.load(handle)
-    except (OSError, ValueError, plistlib.InvalidFileException):
+    except (OSError, ValueError, ExpatError, plistlib.InvalidFileException):
+        # ExpatError is not a ValueError: an XML plist parses through expat, so
+        # a truncated one would otherwise escape the "version unknown" fallback.
         return {}
     if not isinstance(info, dict):
         return {}

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import HostProvider
-from .flavors import HostFlavor, _existing
+from .flavors import HostFlavor
 
 PACKAGE_ID = "ByteDance.CapCut"
 WINGET_COMMAND = (
@@ -26,12 +26,21 @@ class WindowsHostFlavor(HostFlavor):
     """A Windows edition: an ``.exe`` under one of the standard install roots."""
 
     def candidate_paths(self) -> list[Path]:
-        roots = [
-            Path(os.environ.get("LOCALAPPDATA", "")) / self.app_dir / "Apps",
-            Path(os.environ.get("PROGRAMFILES", "")) / self.app_dir,
-            Path(os.environ.get("PROGRAMFILES(X86)", "")) / self.app_dir,
+        # Filter the raw environment roots before appending the install layout.
+        # An unset variable would otherwise produce a relative candidate such as
+        # "CapCut/Apps/CapCut.exe", which can match a directory in the current
+        # working directory instead of a real install root. Order is kept
+        # identical to the original table: per-user Apps first.
+        layouts = (
+            (os.environ.get("LOCALAPPDATA", ""), Path(self.app_dir) / "Apps"),
+            (os.environ.get("PROGRAMFILES", ""), Path(self.app_dir)),
+            (os.environ.get("PROGRAMFILES(X86)", ""), Path(self.app_dir)),
+        )
+        return [
+            root / layout / self.exe
+            for root, layout in ((Path(value), layout) for value, layout in layouts)
+            if str(root) not in {".", ""}
         ]
-        return [root / self.exe for root in _existing(*roots)]
 
     def install_command(self) -> str:
         return (

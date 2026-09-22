@@ -49,7 +49,7 @@ result.
 
 | Tool | Side effects | Notes |
 | --- | --- | --- |
-| `detect_installation` | none | Read-only discovery through the platform provider: Windows candidates under `%LOCALAPPDATA%\CapCut\Apps` and `%PROGRAMFILES%\CapCut`; macOS `/Applications/*.app` bundles with their `Info.plist` version. Reports `provider` and `supported`; on Linux reports `unsupported` with a reason. |
+| `detect_installation` | none | Read-only discovery through the platform provider, for **both** shipped editions. Windows: `%LOCALAPPDATA%\<app>\Apps\<exe>` and `%PROGRAMFILES%\<app>\<exe>`, where `<app>`/`<exe>` is `CapCut`/`CapCut.exe` or `JianyingPro`/`JianyingPro.exe`. macOS: `CapCut.app` and `JianyingPro.app` under `/Applications` and `~/Applications`, with the `Info.plist` bundle version. Reports `provider` and `supported`; on Linux reports `unsupported` with a reason. |
 | `installation_plan` | none | A reviewable per-platform plan: the exact WinGet command on Windows, `brew install --cask capcut` or the official download page on macOS, and an explicit `unsupported` verdict on Linux. Never installs anything. |
 | `install_capcut` | installs software | Requires `grant_id`; runs through the host grant, never a local shell. |
 | `auto_setup_capcut` | installs + binds | One consent-gated flow: install when missing, configure the shared runtime, load the panel, verify. Idempotent. |

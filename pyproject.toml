@@ -11,7 +11,7 @@ requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "loonghao", email = "hal.long@outlook.com" }]
 dependencies = [
-  "dcc-mcp-core>=0.19.13,<1.0.0",
+  "dcc-mcp-core>=0.19.90,<1.0.0",
 ]
 
 [project.urls]

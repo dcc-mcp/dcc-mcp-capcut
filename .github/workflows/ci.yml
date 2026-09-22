@@ -91,9 +91,10 @@ jobs:
     name: dcc-mcp-core ${{ matrix.core }} (${{ matrix.label }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # The declared floor is unverified by design: this job exists to produce the
-    # evidence, not to gate the merge. Once a floor entry is green it must be
-    # promoted to experimental: false so a regression fails the build.
+    # Both supported floors are green, so they gate the merge: a regression on
+    # either one must fail the build. The 0.19.13 entry stays report-only on
+    # purpose -- that version does not exist on PyPI, so the lane documents the
+    # phantom floor it replaced rather than testing a supported combination.
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -102,11 +103,11 @@ jobs:
           - core: "0.20.21"
             label: CI-verified
             experimental: false
-          - core: "0.19.45"
-            label: lowest installable 0.19.x
-            experimental: true
+          - core: "0.19.90"
+            label: declared floor (lowest usable)
+            experimental: false
           - core: "0.19.13"
-            label: floor as declared in pyproject.toml
+            label: phantom floor, absent from PyPI
             experimental: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -167,7 +168,7 @@ jobs:
             echo "- Install step: \`$install\`"
             echo "- Test suite: \`$suite\`"
             echo "- Gate: $([[ "${{ matrix.experimental }}" == "true" ]] && echo 'reported only (continue-on-error)' || echo 'blocking')"
-            echo "- Declared floor in \`pyproject.toml\`: \`dcc-mcp-core>=0.19.13,<1.0.0>\`"
+            echo "- Declared floor in \`pyproject.toml\`: \`dcc-mcp-core>=0.19.90,<1.0.0>\`"
             echo ""
             echo "A \`NOT USABLE\` verdict on a floor entry is the evidence to raise"
             echo "the declared floor; it must not be silenced by relaxing this job. A"

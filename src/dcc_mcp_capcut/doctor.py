@@ -59,7 +59,7 @@ EXIT_OK = 0
 EXIT_FAILED = 1
 
 MIN_PYTHON = (3, 9)
-MIN_CORE_VERSION = "0.19.13"
+MIN_CORE_VERSION = "0.19.90"
 DEFAULT_BRIDGE_PORT = 47410
 DEFAULT_BRIDGE_TOKEN = "dev-token"
 PANEL_DIR = Path(__file__).resolve().parent / "capcut_panel"

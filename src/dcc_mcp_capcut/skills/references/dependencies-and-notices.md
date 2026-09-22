@@ -15,29 +15,45 @@ from an older release.
 
 | Dependency | Pin | License | Distributed in this wheel? |
 | --- | --- | --- | --- |
-| `dcc-mcp-core` | `>=0.19.13,<1.0.0`; doctor floor `0.19.13`; CI-verified `0.20.21` (see below) | MIT | No — resolved from PyPI at install time |
+| `dcc-mcp-core` | `>=0.19.90,<1.0.0`; doctor floor `0.19.90`; CI-verified `0.19.90` and `0.20.21` (see below) | MIT | No — resolved from PyPI at install time |
 | `opentimelineio` | `>=0.16,<1` (optional extra `interchange`) | Apache-2.0 | No — optional extra, resolved from PyPI |
 
 Neither dependency is vendored or modified here. Their licenses apply to the
 packages you install, and only to those packages.
 
-### `dcc-mcp-core` floor versus CI-verified version
+### `dcc-mcp-core` floor
 
-The declared install floor and the combination CI actually exercises are not the
-same number, and the gap is deliberate while the evidence is collected:
+The declared install floor is `0.19.90`. It was raised from `0.19.13` after
+measurement, and the reason is recorded here so the number is never moved back
+without new evidence:
 
-| Fact | Value | Where it is enforced |
+| Version | `DccServerOptions.from_env` has `instance_type` | Measured on this adapter |
 | --- | --- | --- |
-| Declared install floor | `>=0.19.13,<1.0.0` | `pyproject.toml`, mirrored by the doctor's `MIN_CORE_VERSION` |
-| Lowest version that floor resolves to | `0.19.45` | PyPI; no `0.19.13` release exists, so the floor is not installable as written |
-| CI-verified combination | `0.20.21` | `core-floor` job in `.github/workflows/ci.yml`, plus `dcc-mcp-cli v0.20.21` in the `skill-contract` lint job |
-| Skill-declared compatibility | `dcc-mcp-core 0.20.21+` | `compatibility` in each `capcut-*/SKILL.md` frontmatter |
+| `0.19.13` | n/a | **Not on PyPI.** No such release exists, so the old floor could not be installed as written. |
+| `0.19.45` | **No** | **2 failed / 199 passed** — `TypeError: DccServerOptions.from_env() got an unexpected keyword argument 'instance_type'` at `src/dcc_mcp_capcut/server.py:38` |
+| `0.19.90` | **Yes** (introduced here) | **201 passed** — the declared floor, and the lowest usable 0.19.x |
+| `0.20.21` | Yes | **201 passed** — the version the `skill-contract` lint job pins |
 
-The `core-floor` job reports each version as `USABLE`, `NOT USABLE`, or
-`NOT INSTALLABLE` in its job summary. Treat a `NOT USABLE` floor entry as the
-evidence for raising the declared floor; do not close the gap by relaxing that
-job. Until the floor moves, a version between `0.19.13` and `0.20.21` is
-permitted by the install constraint but is not a verified combination.
+There is no 0.19.x release between `0.19.45` and `0.19.90` on PyPI, so `0.19.90`
+is the exact boundary: `instance_type` is what the adapter needs and `0.19.90`
+is the first version that has it. `0.19.90` still declares
+`requires_python>=3.7` and ships `cp37` wheels, so the Python 3.7 line is
+unaffected.
+
+Supporting `0.19.45` by omitting `instance_type` was considered and rejected:
+the attribute does not exist there, so the adapter would silently drop the GUI
+instance declaration that core writes into `instance_metadata` for discovery.
+That would remove the guard rather than satisfy it.
+
+The `core-floor` CI job pins one version at a time and reports `USABLE`,
+`NOT USABLE`, `NOT RESOLVABLE`, or `NOT INSTALLABLE` in its job summary. Both
+supported floors (`0.19.90`, `0.20.21`) are blocking; the `0.19.13` entry is
+report-only and documents the phantom floor it replaced. Do not close a gap by
+relaxing that job or by deleting a lane.
+
+Skill `compatibility` declares `dcc-mcp-core 0.20.21+`, the combination the
+`skill-contract` lint job pins; the install floor is the lower bound, not the
+recommended version.
 
 ## Native and external run-time dependencies (not bundled)
 

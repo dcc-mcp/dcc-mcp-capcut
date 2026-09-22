@@ -8,7 +8,9 @@ member, so a consumer can verify the artifact rather than trust it:
 ``host_acceptance`` is optional host-build evidence (architecture, compiler ABI,
 Qt version, probe protocol, and the acceptance run that backs them). The shared
 Python panel build neither needs nor fabricates it; a future native bundle from
-``native/qt-probe`` should reuse this same manifest shape and supply it.
+``native/qt-probe`` should reuse this same manifest shape and supply it. It is
+carried as a record, not verified: ``--verify`` only checks member digests and
+does not validate ``host_acceptance`` against the host it describes.
 """
 
 from __future__ import annotations
@@ -91,7 +93,7 @@ def verify_archive(path: Path) -> list[str]:
     """Check ``path`` against its own manifest.
 
     Returns a list of human-readable problems; an empty list means every member
-    is present, covered by the manifest, and matches its recorded digest.
+    is unique, covered by the manifest, and matches its recorded digest.
 
     The manifest format is backward compatible (the original fields are
     unchanged and new consumers may ignore the digests), but this verifier is
@@ -99,9 +101,25 @@ def verify_archive(path: Path) -> list[str]:
     nothing to check, so it is reported as a problem rather than passed by
     default. Verifying a historical release artifact therefore means building
     it again from its tag, not re-checking the published file.
+
+    Only member digests are checked. ``host_acceptance``, when present, is
+    reported as recorded evidence and is not validated against any host.
     """
     with ZipFile(path) as archive:
-        members = set(archive.namelist())
+        names = archive.namelist()
+        members = set(names)
+        # Readers resolve a repeated name to whichever entry was written last,
+        # so a duplicated member would be verified against one copy while a
+        # consumer silently extracts the other. Treat that as malformed rather
+        # than verifying only the winning copy.
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for name in names:
+            if name in seen:
+                duplicates.add(name)
+            seen.add(name)
+        if duplicates:
+            return [f"{name} appears more than once in the archive" for name in sorted(duplicates)]
         if MANIFEST_NAME not in members:
             return [f"{MANIFEST_NAME} is missing from the archive"]
         try:

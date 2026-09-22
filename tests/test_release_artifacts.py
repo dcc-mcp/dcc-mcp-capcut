@@ -185,6 +185,30 @@ def test_verify_flags_a_payload_with_no_recorded_digest(tmp_path):
     assert any("extra.js" in problem and "no recorded digest" in problem for problem in problems)
 
 
+def test_verify_rejects_duplicate_members(tmp_path):
+    """A repeated name is malformed, even when the winning copy is intact.
+
+    Readers resolve a repeated name to the entry written last, so verifying
+    only that copy would leave an archive that checks out here but extracts
+    different bytes for a consumer. Malformed wins over "the last one matches".
+    """
+    archive_path = tmp_path / "panel.zip"
+    build(archive_path, "0.1.0")
+    member = f"{PANEL_PREFIX}/{FILES[0]}"
+
+    with ZipFile(archive_path) as source:
+        members = {name: source.read(name) for name in source.namelist()}
+    with ZipFile(archive_path, "w", ZIP_DEFLATED) as target:
+        for name, data in members.items():
+            target.writestr(name, data)
+        # Append a second copy with different bytes; the manifest digest still
+        # matches whichever copy the reader happens to resolve.
+        target.writestr(member, b"console.log('tampered duplicate')")
+
+    problems = verify_archive(archive_path)
+    assert any("appears more than once" in problem and member in problem for problem in problems)
+
+
 def test_verify_reports_a_missing_manifest(tmp_path):
     archive_path = tmp_path / "panel.zip"
     with ZipFile(archive_path, "w", ZIP_DEFLATED) as archive:

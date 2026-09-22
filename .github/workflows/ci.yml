@@ -125,7 +125,17 @@ jobs:
             echo "resolvable=true" >> "$GITHUB_OUTPUT"
           else
             echo "resolvable=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::dcc-mcp-core==${{ matrix.core }} cannot be resolved from PyPI; the declared floor may not exist."
+            if [[ "${{ matrix.experimental }}" == "true" ]]; then
+              # Report-only lane: the unresolvable pin IS the finding this lane
+              # exists to publish, so it must not fail the build.
+              echo "::warning::dcc-mcp-core==${{ matrix.core }} cannot be resolved from PyPI; the declared floor may not exist."
+            else
+              # A supported floor that stops resolving is the exact regression
+              # this job exists to catch, so it has to fail the build rather
+              # than leave an annotation nobody reads.
+              echo "::error::dcc-mcp-core==${{ matrix.core }} cannot be resolved from PyPI; a supported floor must stay installable."
+              exit 1
+            fi
           fi
       - name: Install
         id: install

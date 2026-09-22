@@ -49,6 +49,7 @@ def parse_frontmatter(path: Path) -> tuple[dict, str]:
 def test_every_skill_directory_was_discovered():
     assert [path.name for path in SKILL_DIRS] == [
         "capcut-ai",
+        "capcut-assemble",
         "capcut-audio",
         "capcut-effects",
         "capcut-export",

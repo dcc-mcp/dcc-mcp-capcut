@@ -1,0 +1,45 @@
+tools:
+  - name: apply_edit_plan
+    description: Assemble a canonical edit plan (or a vlog recipe) plus a media directory into a CapCut project in one call. Validates host-free first; dry_run returns the action script without touching the host.
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        plan:
+          type: object
+          description: Canonical dcc-mcp-capcut/edit-plan/v1 document (frame-based).
+        recipe:
+          type: object
+          description: capcut-vlog-recipe/v1 document (seconds-based); compiled to the canonical plan.
+        media_dir:
+          type: string
+          minLength: 1
+          description: Directory the plan's portable relative media paths resolve against. Required unless dry_run is true.
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          default: 30
+          description: Frame rate used when compiling a seconds-based recipe.
+        media_index:
+          type: object
+          description: Maps recipe asset ids to portable relative paths, for entries such as a music bed that carry an id instead of a path.
+        strategy:
+          type: string
+          enum: [auto, host, composed]
+          default: auto
+          description: auto tries the single host action then falls back; host refuses to fall back; composed walks the action script itself.
+        export:
+          type: boolean
+          default: false
+          description: Append an export_video step using the plan's output path.
+        dry_run:
+          type: boolean
+          default: false
+          description: Compile and validate only; return the action script without dispatching anything.
+    read_only: false
+    destructive: true
+    idempotent: false
+    execution: sync
+    affinity: any
+    timeout_hint_secs: 900
+    source_file: scripts/apply_edit_plan.py

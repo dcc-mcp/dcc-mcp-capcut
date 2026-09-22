@@ -32,6 +32,29 @@ the panel must never silently install software or claim readiness before the
 CapCut process, bridge health, panel load, and exact PID/HWND binding are
 verified.
 
+### Batch assembly: `apply_edit_plan`
+
+`apply_edit_plan` is an **optional** action: one call carries a whole
+`dcc-mcp-capcut/edit-plan/v1` document (see `docs/edit-plan.md`) and places it
+as a project. A host that implements it should:
+
+1. Execute the supplied `script.actions` in order, resolving `media_dir`
+   against the plan's portable relative paths.
+2. Return `timeline_id`, `verification.ok: true`, and the authoritative
+   timeline readback under `verification.timeline`.
+3. Be atomic where the host allows it, and return a structured error when it
+   cannot be, naming the steps it already applied.
+
+**A host that does not implement it must reject it as an unsupported action**, with
+a message containing `Unsupported action: apply_edit_plan` (the panel
+stringifies rejections, so the marker has to be in the text). That marker is
+the only signal that makes the adapter fall back to composing the plan from
+the individual actions above. Rejecting for any other reason is treated as a
+real failure and is never retried as a different edit.
+
+The adapter's fallback walks the action script itself, so a host can adopt the
+batch action at its own pace; until then `auto` resolves to the composed path.
+
 The host implementation should return stable IDs (`media_id`, `timeline_id`,
 `clip_id`, `text_id`, `effect_id`, `job_id`) and include a post-operation
 readback (`project`, `timeline`, or `export`) so acceptance can verify the real

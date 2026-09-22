@@ -14,7 +14,7 @@ lands at the checkout root can find the real content. It is not the authoritativ
 description of any CapCut capability.
 
 - **Authoritative content lives inside the package**, in
-  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 11 files ship in the
+  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 12 files ship in the
   wheel, which is what an agent actually consumes.
 - **This file is not in the lint loop.** CI validates
   `src/dcc_mcp_capcut/skills/capcut-*` with `dcc-mcp-cli lint --warnings-as-errors`
@@ -37,12 +37,13 @@ description of any CapCut capability.
 | `capcut-project` | Project lifecycle, canvas, and project settings. |
 | `capcut-media` | Import, list, relink, proxy, and bin removal of media. |
 | `capcut-timeline` | Timeline creation and clip/transition editing. |
+| `capcut-assemble` | One-call assembly of a canonical edit plan plus a media directory into CapCut. |
 | `capcut-text` | Text overlays, subtitle import, auto-captions. |
 | `capcut-audio` | Audio placement, level, and fades. |
 | `capcut-effects` | Effects and color adjustment. |
 | `capcut-ai` | Optional host-side background removal and stabilization. |
 | `capcut-export` | Render, monitor, cancel, thumbnail, and the vlog recipe. |
-| `capcut-interchange` | Portable OpenTimelineIO export from supplied edit decisions. No host required. |
+| `capcut-interchange` | Canonical edit plan: compile, portable OpenTimelineIO export and import. No host required. |
 | `capcut-native` | Optional read-only Qt metadata probe. Diagnostics only. |
 
 ## Shared references

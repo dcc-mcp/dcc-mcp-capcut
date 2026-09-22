@@ -10,6 +10,7 @@ _MUTATING_ACTIONS = {
     "add_clip",
     "add_text",
     "add_transition",
+    "apply_edit_plan",
     "apply_effect",
     "auto_captions",
     "build_vlog_demo",
@@ -43,6 +44,7 @@ _MUTATING_ACTIONS = {
 
 _REQUIRED_IDS = {
     "add_audio": ("audio_id",),
+    "apply_edit_plan": ("timeline_id",),
     "add_clip": ("clip_id",),
     "add_text": ("text_id",),
     "add_transition": ("transition_id",),
@@ -65,6 +67,7 @@ _TIMELINE_READBACK_ACTIONS = {
     "add_clip",
     "add_text",
     "add_transition",
+    "apply_edit_plan",
     "apply_effect",
     "auto_captions",
     "color_adjust",

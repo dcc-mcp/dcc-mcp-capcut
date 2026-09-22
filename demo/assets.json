@@ -7,6 +7,7 @@
       "source": "https://svs.gsfc.nasa.gov/4593/",
       "download_url": "https://svs.gsfc.nasa.gov/vis/a000000/a004100/a004129/fromearth2_360p30.mp4",
       "download_hint": "fromearth2_360p30.mp4 (153 KB)",
+      "local_path": "assets/earthrise.mp4",
       "license": "NASA public domain",
       "role": "opening establishing shot"
     },
@@ -16,6 +17,7 @@
       "source": "https://photojournal.jpl.nasa.gov/animation/PIA14898",
       "download_url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia14/pia14898/PIA14898_ASTER_Oahu_320.mp4",
       "download_hint": "PIA14898_ASTER_Oahu_320.mp4",
+      "local_path": "assets/oahu_flyover.mp4",
       "license": "NASA/JPL public domain",
       "role": "travel montage"
     },
@@ -23,6 +25,7 @@
       "id": "free_music",
       "kind": "audio",
       "source": "demo/render_vlog.py",
+      "local_path": "assets/free_ambient.wav",
       "license": "Original audio generated locally with FFmpeg sine sources",
       "role": "background music"
     }

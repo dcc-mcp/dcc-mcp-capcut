@@ -19,9 +19,13 @@ an empty "not installed" they could mistake for a broken install.
 | macOS | `macos` | yes | `CapCut.app` / `JianyingPro.app` under `/Applications` and `~/Applications`; `Contents/Info.plist` supplies `CFBundleShortVersionString` and `CFBundleIdentifier` | `brew install --cask capcut` where a cask exists, otherwise the official download page | `dcc-cua list`; a missing CLI degrades to `warn` |
 | Linux | `linux` | no | none | none; `status: unsupported` plus the reason | not attempted |
 
-Windows discovery and planning are unchanged by this refactor. Only the
-packaging moved: the same candidate roots, the same flavour order (CapCut
-before JianyingPro), and the same doctor verdicts.
+Windows verdicts and candidate-root ordering are unchanged by this refactor:
+the same roots in the same order, the same flavour order (CapCut before
+JianyingPro), the same plan shape and the same doctor output. One edge case did
+move: the roots are now filtered *before* the install layout is appended, so a
+machine with `LOCALAPPDATA` / `PROGRAMFILES` unset no longer yields relative
+candidates such as `CapCut\Apps\CapCut.exe`. Those could never match a real
+install and could match a directory in the current working directory.
 
 ## macOS specifics
 

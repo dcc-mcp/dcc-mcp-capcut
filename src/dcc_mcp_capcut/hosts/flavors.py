@@ -59,4 +59,4 @@ def _existing(*paths: Path) -> list[Path]:
     return [path for path in paths if str(path) not in {".", ""}]
 
 
-__all__ = ["HostFlavor", "_existing"]
+__all__ = ["HostFlavor"]

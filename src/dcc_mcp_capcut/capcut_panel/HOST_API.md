@@ -1,5 +1,9 @@
 # CapCut host API contract
 
+This file is written for whoever **implements** `window.CapCut` — the CapCut-side
+host integration. If you are instead trying to *load* the panel as an operator,
+read [`LOADING.md`](LOADING.md) first.
+
 The bundled panel intentionally depends on a host-provided `window.CapCut`
 object. The object must expose:
 

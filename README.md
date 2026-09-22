@@ -26,12 +26,25 @@ The `capcut-setup` skill is built in. Call `detect_installation` and then
 `installation_plan` when CapCut is missing. `auto_setup_capcut` executes the
 full install-and-bind flow after receiving an operator-owned
 `ui_control__system_operation` grant: it installs `ByteDance.CapCut` when
-needed, configures the shared runtime/bridge, loads the panel, and verifies the
-exact CapCut process. The adapter never shells out, edits the registry, or
-silently installs software.
+needed, configures the shared runtime/bridge, and verifies the exact CapCut
+process. **It does not inject the panel** — that step is operator-owned and
+consent-gated, and no automatic loader ships with this package (see
+`capcut_panel/LOADING.md`). The adapter never shells out, edits the registry,
+or silently installs software.
 
-Install/load the panel from `src/dcc_mcp_capcut/capcut_panel` in the supported
-CapCut extension host, then verify `GET /health` on the bridge URL. Set
+Host-bound capabilities additionally need the bundled panel running **inside**
+the CapCut process, because the panel is what drains the bridge queue — see
+[`src/dcc_mcp_capcut/capcut_panel/LOADING.md`](src/dcc_mcp_capcut/capcut_panel/LOADING.md)
+for what the panel is, what it requires, and how to confirm it is connected.
+That guide also records the current limit: **this package ships the panel
+payload but no automatic loader**, so injecting it is operator-owned,
+consent-gated work. Until something polls the bridge, `panel_connected` stays
+`false` and host actions stay queued until the request timeout elapses. Treat
+`panel_connected` as a liveness signal for a poller, not as proof that
+`window.CapCut` exists: a panel opened in a normal browser also reports `true`
+while every host action fails immediately.
+
+Verify with `GET /health` on the bridge URL, and set
 `DCC_MCP_CAPCUT_BRIDGE_TOKEN` to a per-user secret for production use.
 
 ## Vlog demo

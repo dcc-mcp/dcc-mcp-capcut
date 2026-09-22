@@ -45,18 +45,34 @@ as a project. A host that implements it should:
 3. Be atomic where the host allows it, and return a structured error when it
    cannot be, naming the steps it already applied.
 
-**A host that does not implement it must reject it as an unsupported action**, with
-a message containing both the marker and the action name, e.g.
-`Unsupported action: apply_edit_plan` (the panel stringifies rejections, so the
-text has to carry both). The adapter's fallback requires **both**: the marker
-`unsupported action` (`unsupported_action` in a structured payload) *and* the
-name `apply_edit_plan`.
+**A host that does not implement it must reject it with this exact shape:**
 
-That pairing is deliberate. A marker alone is too broad -- `unsupported action
-parameter`, or a rejection naming a *different* action, are real failures, and
-the adapter must not replay the plan as a composed script over a timeline the
-batch action may already have partly assembled. Rejecting for any other reason
-is treated as a real failure and is never retried as a different edit.
+```text
+Unsupported action: apply_edit_plan
+```
+
+The adapter matches the marker `unsupported action` (or `unsupported_action` in
+a structured payload), a colon, then the action name. The panel stringifies
+rejections, so the text has to carry all of it.
+
+**Be precise about which failure you are reporting.** A host that *does*
+implement the action and rejects one of its arguments must **not** use that
+shape -- put the qualifier before the colon, as in
+`Unsupported action parameter for apply_edit_plan: media_dir`. The two cases are
+distinguished on purpose:
+
+| Host situation | Correct message | Adapter behaviour |
+| --- | --- | --- |
+| Action not implemented | `Unsupported action: apply_edit_plan` | Falls back to composing the plan from the individual actions. |
+| Action implemented, argument invalid | `Unsupported action parameter for apply_edit_plan: media_dir` | Reported as a real failure. Never retried as a different edit. |
+
+Getting this wrong in the first direction is the expensive one: a parameter
+error that looks like "not implemented" makes the adapter replay the whole plan
+as a composed script over a timeline the batch action may already have partly
+assembled, and the composed walk does not roll back. A host that under-reports
+"not implemented" merely loses the fast path and still works via composition.
+Rejecting for any other reason is treated as a real failure and is never retried
+as a different edit.
 
 The adapter's fallback walks the action script itself, so a host can adopt the
 batch action at its own pace; until then `auto` resolves to the composed path.

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 import posixpath
+import re
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
@@ -60,14 +61,16 @@ MEDIA_PLACEHOLDER = "$media:"
 TIMELINE_PLACEHOLDER = "$timeline"
 CLIP_PLACEHOLDER = "$clip:"
 
-# The markers a host uses to reject an action it does not implement; see
-# capcut_panel/HOST_API.md. Deliberately narrow: a wider set turns unrelated
-# host errors into a fallback that replays the same plan as a composed script
-# after the batch action may already have applied part of it.
-UNSUPPORTED_ACTION_MARKERS = (
-    "unsupported action",
-    "unsupported_action",
-)
+# The exact phrasing a host uses to reject an action it does not implement; see
+# capcut_panel/HOST_API.md. Anchored on the documented shape -- marker, colon,
+# then the action name -- rather than matched as bare substrings, because a host
+# that *does* implement the action reports bad arguments with overlapping words
+# ("Unsupported action parameter for apply_edit_plan: media_dir"). Mistaking
+# that for "not implemented" replays the whole plan as a composed script after
+# the batch action may already have applied part of it, and the composed walk
+# does not roll back. A false positive is far costlier than a false negative,
+# so the match is deliberately strict.
+UNSUPPORTED_ACTION_PATTERN = r"unsupported[ _]action['\"]?\s*:\s*['\"]?"
 
 
 def relative_media(value: Any) -> str:
@@ -628,6 +631,27 @@ def plan_to_edl(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def resolve_referenced_files(base: Path, referenced: list[str]) -> dict[str, Path]:
+    """Resolve each referenced path against the delivery root, keeping it inside.
+
+    ``is_file()`` follows symlinks, so checking the joined path proves a file
+    exists without proving where it lives: a link inside the delivery root can
+    resolve to anything on the filesystem. Resolving first and then checking
+    containment is what makes "every referenced file is inside ``media_dir``"
+    true at the filesystem level rather than only lexically.
+    """
+    resolved: dict[str, Path] = {}
+    for path in referenced:
+        candidate = (base / path).resolve()
+        if candidate != base and base not in candidate.parents:
+            raise ValueError(
+                f"referenced file resolves outside the delivery root: {path} -> "
+                f"{candidate} (root {base})"
+            )
+        resolved[path] = candidate
+    return resolved
+
+
 def plan_to_actions(
     plan: dict[str, Any],
     *,
@@ -674,16 +698,20 @@ def plan_to_actions(
         referenced.append(subtitle["file"])
 
     resolved = media_order
+    resolved_references: dict[str, Path] = {}
     if media_dir is not None:
         base = Path(media_dir).resolve()
-        missing = [path for path in referenced if not (base / path).is_file()]
+        resolved_references = resolve_referenced_files(base, referenced)
+        missing = [path for path in referenced if not resolved_references[path].is_file()]
         if missing:
             raise ValueError(
                 "media_dir does not contain every referenced file: "
                 + ", ".join(sorted(missing))
                 + f" (looked under {base})"
             )
-        resolved = [str(base / path) for path in media_order]
+        # Dispatch the resolved path, not the joined one: a symlink inside the
+        # delivery root would otherwise be handed to the host pointing outside it.
+        resolved = [str(resolved_references[path]) for path in media_order]
 
     # One import per file, not one import for the whole list. The fail-closed
     # contract only guarantees import_media returns a single 'media_id', so a
@@ -756,7 +784,7 @@ def plan_to_actions(
     if subtitle is not None:
         subtitle_path = subtitle["file"]
         if media_dir is not None:
-            subtitle_path = str(Path(media_dir).resolve() / subtitle["file"])
+            subtitle_path = str(resolved_references[subtitle["file"]])
         params = {"timeline_id": TIMELINE_PLACEHOLDER, "path": subtitle_path}
         if subtitle.get("format") is not None:
             params["format"] = subtitle["format"]
@@ -810,16 +838,20 @@ def plan_to_actions(
 def is_unsupported_action(error: BaseException, action: str = "apply_edit_plan") -> bool:
     """Report whether a host rejection means "this exact action is not implemented".
 
-    Both the marker and the action name must be present. The marker alone is not
-    enough: ``unsupported action parameter`` or a rejection naming a *different*
-    action are real failures, and treating them as "not implemented" would replay
-    the plan as a composed script over a timeline the batch action may have
-    already partly assembled.
+    Matches the documented rejection shape ``unsupported action: <action>``
+    (``unsupported_action: <action>`` in a structured payload). Requiring the
+    colon rules out the parameter errors a host that *does* implement the action
+    reports, such as ``Unsupported action parameter for apply_edit_plan:
+    media_dir`` -- which contains both the marker and the action name and would
+    otherwise trigger a fallback that replays the plan over a timeline the batch
+    action may already have partly assembled. The trailing word boundary rejects
+    a longer action name that merely starts with this one.
     """
-    message = str(error).lower()
-    return any(
-        marker in message and action.lower() in message for marker in UNSUPPORTED_ACTION_MARKERS
-    )
+    # An optional quote absorbs the stringified structured form
+    # "{'unsupported_action': 'apply_edit_plan'}", where the panel has already
+    # turned a dict rejection into text.
+    pattern = UNSUPPORTED_ACTION_PATTERN + re.escape(action.lower()) + r"\b"
+    return bool(re.search(pattern, str(error).lower()))
 
 
 def substitute_placeholders(params: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

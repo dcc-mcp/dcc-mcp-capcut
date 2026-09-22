@@ -554,6 +554,76 @@ def test_export_step_requires_an_output_path(plan):
     assert steps[-2]["params"]["output_path"] == "out/vlog.mp4"
 
 
+def test_a_parameter_error_from_a_host_that_implements_the_action():
+    """Regression: the misclassification CodeRabbit found at editplan.py:822.
+
+    This exact string contains both the marker and the action name, so the
+    previous substring test accepted it. The host *does* implement
+    ``apply_edit_plan`` and is rejecting one argument; treating that as "not
+    implemented" makes ``auto`` replay the plan as a composed script over a
+    timeline the batch action may already have partly assembled.
+    """
+    assert not is_unsupported_action(
+        RuntimeError("Unsupported action parameter for apply_edit_plan: media_dir")
+    )
+    # Same failure mode, other phrasings a host might use.
+    for message in (
+        "unsupported action argument for apply_edit_plan",
+        "unsupported action field for apply_edit_plan: fps",
+        "Unsupported action value for apply_edit_plan",
+        "unsupported action option for apply_edit_plan: strategy",
+    ):
+        assert not is_unsupported_action(RuntimeError(message)), message
+
+
+def test_the_documented_rejection_shape_still_matches():
+    """The anchored pattern must keep accepting what HOST_API.md promises."""
+    for message in (
+        "Unsupported action: apply_edit_plan",
+        "unsupported action: apply_edit_plan",
+        "Unsupported action:  apply_edit_plan",
+        '{"unsupported_action": "apply_edit_plan"}',
+        "{'unsupported_action': 'apply_edit_plan'}",
+        "Unsupported Action: APPLY_EDIT_PLAN",
+    ):
+        assert is_unsupported_action(RuntimeError(message)), message
+
+    # A longer action name that merely starts with this one is not a match.
+    assert not is_unsupported_action(RuntimeError("Unsupported action: apply_edit_plan_v2"))
+
+
+def test_a_symlink_cannot_escape_the_delivery_root(recipe, tmp_path):
+    """Containment has to hold at the filesystem level, not just lexically.
+
+    ``is_file()`` follows symlinks, so checking the joined path proves a file
+    exists without proving where it lives. A link inside the delivery root that
+    points elsewhere must not be handed to the host.
+    """
+    secret = tmp_path / "secret.srt"
+    secret.write_text("out of bounds")
+    delivery = tmp_path / "demo"
+    (delivery / "assets").mkdir(parents=True)
+    for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+        (delivery / "assets" / name).write_bytes(b"")
+
+    plan = compile_plan(recipe, media_index=MEDIA_INDEX)
+    for name in ("galaxy_zh.srt",):
+        target = delivery / name
+        try:
+            target.symlink_to(secret)
+        except (OSError, NotImplementedError):  # pragma: no cover - needs privileges
+            pytest.skip(f"symlinks unavailable on {sys.platform}")
+
+    with pytest.raises(ValueError, match="resolves outside the delivery root"):
+        plan_to_actions(plan, media_dir=str(delivery))
+
+    # A media link escapes the same way.
+    (delivery / "assets" / "earthrise.mp4").unlink()
+    (delivery / "assets" / "earthrise.mp4").symlink_to(secret)
+    with pytest.raises(ValueError, match="resolves outside the delivery root"):
+        plan_to_actions(plan, media_dir=str(delivery))
+
+
 def test_only_a_rejection_naming_this_action_means_fall_back():
     """Both the marker and the action name are required.
 

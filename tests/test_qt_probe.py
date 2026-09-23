@@ -39,6 +39,30 @@ def test_stale_endpoint_rejected(endpoint, monkeypatch):
         inspect_qt_host()
 
 
+def test_missing_endpoint_file_is_reported_not_raised(endpoint):
+    # The host writes the endpoint at launch; an absent file used to surface as
+    # a bare FileNotFoundError that the failure-recovery table did not cover.
+    path, _ = endpoint
+    path.unlink()
+    with pytest.raises(RuntimeError, match="endpoint file is missing"):
+        inspect_qt_host()
+
+
+def test_unreadable_endpoint_directory_is_reported(endpoint):
+    path, _ = endpoint
+    path.unlink()
+    path.mkdir()
+    with pytest.raises(RuntimeError, match="could not be read"):
+        inspect_qt_host()
+
+
+def test_malformed_endpoint_json_is_reported(endpoint):
+    path, _ = endpoint
+    path.write_text("{not json")
+    with pytest.raises(RuntimeError, match="Invalid Qt probe endpoint"):
+        inspect_qt_host()
+
+
 @pytest.mark.parametrize("wrong_identity", [False, True])
 def test_loopback_wire_contract(endpoint, wrong_identity):
     path, value = endpoint

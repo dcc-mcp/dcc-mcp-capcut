@@ -16,7 +16,16 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+# Shared by the broker and every client in this package: an unset token is a
+# documented local-development default, not a missing configuration.
+DEFAULT_BRIDGE_TOKEN = "dev-token"
+
+# Error bodies are adapter-owned loopback text; cap what is echoed so a hostile
+# or broken bridge cannot flood a caller's transcript.
+MAX_ERROR_BODY_CHARS = 500
 
 
 class CapCutBridge:
@@ -27,7 +36,7 @@ class CapCutBridge:
     def __init__(self, prefix: str = "DCC_MCP_CAPCUT", default_port: int = 47410) -> None:
         self.prefix = prefix
         self.port = int(os.environ.get(f"{prefix}_BRIDGE_PORT", default_port))
-        self.token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", "dev-token")
+        self.token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", DEFAULT_BRIDGE_TOKEN)
         self._pending: queue.Queue[dict[str, Any]] = queue.Queue()
         self._waiting: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
         self._lock = threading.Lock()
@@ -153,15 +162,36 @@ def call_bridge(action: str, params: dict[str, Any]) -> dict[str, Any]:
     """Call the running CapCut bridge from a declarative skill script."""
     prefix = "DCC_MCP_CAPCUT"
     url = os.environ.get(f"{prefix}_BRIDGE_URL", "http://127.0.0.1:47410").rstrip("/") + "/call"
-    token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", "dev-token")
+    token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", DEFAULT_BRIDGE_TOKEN)
     request = Request(
         url,
         data=json.dumps({"action": action, "params": params}).encode("utf-8"),
         headers={"Content-Type": "application/json", "X-DCC-MCP-Token": token},
         method="POST",
     )
-    with urlopen(request, timeout=35) as response:  # noqa: S310 - adapter-owned loopback URL
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=35) as response:  # noqa: S310 - adapter-owned loopback URL
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        # The broker reports every actionable failure -- panel lease expired,
+        # rejected token, unsupported action -- as an HTTP error carrying a
+        # JSON {"error": ...} body. Without this branch urlopen raises before
+        # the check below runs, so callers saw a bare "HTTP Error 503" and the
+        # real cause was dropped.
+        raise _bridge_error(error) from None
     if "error" in payload:
         raise RuntimeError(payload["error"])
     return payload
+
+
+def _bridge_error(error: HTTPError) -> RuntimeError:
+    """Turn an HTTP error from the broker into an actionable RuntimeError."""
+    body = error.read().decode("utf-8", "replace").strip()
+    try:
+        payload = json.loads(body)
+    except (ValueError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict) and "error" in payload:
+        return RuntimeError(str(payload["error"])[:MAX_ERROR_BODY_CHARS])
+    detail = body[:MAX_ERROR_BODY_CHARS] or str(getattr(error, "reason", "") or "")
+    return RuntimeError(f"CapCut bridge returned HTTP {error.code}: {detail}")

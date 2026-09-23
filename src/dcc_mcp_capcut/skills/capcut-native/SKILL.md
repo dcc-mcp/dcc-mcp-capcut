@@ -59,6 +59,9 @@ procedure.
 | --- | --- | --- |
 | `Qt probe is not configured; no native capabilities established` | `DCC_CAPCUT_PROBE_ENDPOINT` or a >=32-byte token is missing. | Configure the probe environment, or use the panel-backed skills instead. The doctor reports this as `warn`, not `fail`: the adapter still starts. |
 | `Qt probe requires an explicit host PID and executable SHA-256` | The hash is not 64 lowercase hex, or the PID is missing/non-decimal. | Supply both for the bound host. |
+| `Qt probe endpoint file is missing; start the host to write it` | `DCC_CAPCUT_PROBE_ENDPOINT` points at a path the host has not written, or the last host deleted it on exit. | Start the host with the probe configured so it writes a fresh endpoint file; the probe does not attach to a running process. Re-check the path for typos. |
+| `Qt probe endpoint could not be read` | The endpoint file exists but the process cannot open it (permissions, or a directory at that path). | Fix the path and its permissions, then restart the host. |
+| `Invalid Qt probe endpoint` | The endpoint file is present but is not a JSON object (truncated, empty, or not JSON at all). | Restart the host to rewrite the endpoint; do not hand-edit it. |
 | `Qt probe endpoint does not match the bound host` | The endpoint describes a different PID or executable hash, or the protocol is not 1. | Restart the host to write a fresh endpoint file; delete stale endpoints. |
 | `Qt probe response does not match the bound host` | The response's PID, hash, `backend`, or `verification_scope` is wrong. | Confirm the probe build and the bound host match. |
 | `Qt probe rejected the metadata request` | Bad authorization or an unsupported operation. | Check the shared token and the `max_nodes` / `max_depth` bounds. |

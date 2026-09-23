@@ -30,11 +30,23 @@ def inspect_qt_host(
         raise RuntimeError("Qt probe is not configured; no native capabilities established")
     if not re.fullmatch(r"[0-9a-f]{64}", expected_hash) or not expected_pid.isdecimal():
         raise RuntimeError("Qt probe requires an explicit host PID and executable SHA-256")
-    with Path(endpoint_path).open("rb") as stream:
-        raw = stream.read(4097)
+    # A missing or unreadable endpoint file is an operator-facing state, not a
+    # traceback: the host writes it at launch and may delete it on exit.
+    try:
+        with Path(endpoint_path).open("rb") as stream:
+            raw = stream.read(4097)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Qt probe endpoint file is missing; start the host to write it"
+        ) from None
+    except OSError:
+        raise RuntimeError("Qt probe endpoint could not be read") from None
     if len(raw) > 4096:
         raise RuntimeError("Qt probe endpoint exceeds size limit")
-    endpoint = json.loads(raw)
+    try:
+        endpoint = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        raise RuntimeError("Invalid Qt probe endpoint") from None
     if not isinstance(endpoint, dict):
         raise RuntimeError("Invalid Qt probe endpoint")
     if (

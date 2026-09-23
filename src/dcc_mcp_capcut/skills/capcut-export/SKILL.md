@@ -5,7 +5,7 @@ license: MIT
 compatibility: "CapCut Desktop; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.1.0", layer: domain, stage: delivery, tags: "capcut, export, render", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.2.0", layer: domain, stage: delivery, tags: "capcut, export, render", tools: tools.yaml}  # x-release-please-version
 ---
 
 Render delivery. A render is not delivered until the artifact exists on disk and

@@ -153,6 +153,19 @@ def test_call_bridge_survives_an_http_error_with_no_readable_body(monkeypatch):
     assert "KeyError" not in str(raised.value)
 
 
+@pytest.mark.parametrize("body", [b'{"error": null}', b'{"error": 42}', b'{"error": "   "}'])
+def test_call_bridge_falls_back_to_the_status_for_an_unusable_error_value(monkeypatch, body):
+    # A null, numeric or blank error used to surface as the message "None",
+    # which is worse diagnostics than the status code it replaced.
+    server = _ErroringBridge(503, body)
+    try:
+        monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_URL", server.url)
+        with pytest.raises(RuntimeError, match=r"HTTP 503"):
+            call_bridge("inspect_project", {})
+    finally:
+        server.stop()
+
+
 def test_call_bridge_names_the_status_when_the_body_is_not_error_json(monkeypatch):
     server = _ErroringBridge(403, b"forbidden")
     try:

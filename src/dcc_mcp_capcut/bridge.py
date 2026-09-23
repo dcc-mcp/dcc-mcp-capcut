@@ -195,8 +195,11 @@ def _bridge_error(error: HTTPError) -> RuntimeError:
         payload = json.loads(body)
     except (ValueError, json.JSONDecodeError):
         payload = None
-    if isinstance(payload, dict) and "error" in payload:
-        return RuntimeError(str(payload["error"])[:MAX_ERROR_BODY_CHARS])
+    # A null or non-string error is worse than no error text at all: it used
+    # to surface as the message "None". Fall through to the status detail.
+    error_text = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error_text, str) and error_text.strip():
+        return RuntimeError(error_text.strip()[:MAX_ERROR_BODY_CHARS])
     detail = body[:MAX_ERROR_BODY_CHARS] or str(getattr(error, "reason", "") or "")
     return RuntimeError(f"CapCut bridge returned HTTP {error.code}: {detail}")
 

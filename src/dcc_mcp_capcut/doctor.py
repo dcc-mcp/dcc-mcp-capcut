@@ -48,6 +48,7 @@ from typing import Any
 from .__version__ import __version__
 from .asr import ASR_EXECUTOR_ENV, AsrError, configured_executor, resolve_executor
 from .bootstrap import CapCutBindingError, select_capcut_window
+from .bridge import DEFAULT_BRIDGE_TOKEN
 from .hosts import get_provider
 from .installer import verify_installation
 
@@ -63,7 +64,6 @@ EXIT_FAILED = 1
 MIN_PYTHON = (3, 9)
 MIN_CORE_VERSION = "0.19.90"
 DEFAULT_BRIDGE_PORT = 47410
-DEFAULT_BRIDGE_TOKEN = "dev-token"
 PANEL_DIR = Path(__file__).resolve().parent / "capcut_panel"
 PANEL_FILES = ("HOST_API.md", "index.html", "panel.js")
 QT_PROBE_ENV = (

@@ -20,12 +20,16 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # Shared by the broker and every client in this package: an unset token is a
-# documented local-development default, not a missing configuration.
+# documented local-development default, not a missing configuration. An
+# explicitly empty value is treated as unset, so the broker, call_bridge and
+# the health probe can never disagree about which token is in force.
 DEFAULT_BRIDGE_TOKEN = "dev-token"
 
-# Error bodies are adapter-owned loopback text; cap what is echoed so a hostile
-# or broken bridge cannot flood a caller's transcript.
+# Error bodies are adapter-owned loopback text; cap what is read and echoed so
+# a hostile or broken bridge cannot flood a caller's transcript. The read cap
+# is the echo cap plus room for the JSON wrapper around it.
 MAX_ERROR_BODY_CHARS = 500
+MAX_ERROR_BODY_BYTES = MAX_ERROR_BODY_CHARS * 4
 
 
 class CapCutBridge:
@@ -36,7 +40,7 @@ class CapCutBridge:
     def __init__(self, prefix: str = "DCC_MCP_CAPCUT", default_port: int = 47410) -> None:
         self.prefix = prefix
         self.port = int(os.environ.get(f"{prefix}_BRIDGE_PORT", default_port))
-        self.token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", DEFAULT_BRIDGE_TOKEN)
+        self.token = os.environ.get(f"{prefix}_BRIDGE_TOKEN") or DEFAULT_BRIDGE_TOKEN
         self._pending: queue.Queue[dict[str, Any]] = queue.Queue()
         self._waiting: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
         self._lock = threading.Lock()
@@ -162,7 +166,7 @@ def call_bridge(action: str, params: dict[str, Any]) -> dict[str, Any]:
     """Call the running CapCut bridge from a declarative skill script."""
     prefix = "DCC_MCP_CAPCUT"
     url = os.environ.get(f"{prefix}_BRIDGE_URL", "http://127.0.0.1:47410").rstrip("/") + "/call"
-    token = os.environ.get(f"{prefix}_BRIDGE_TOKEN", DEFAULT_BRIDGE_TOKEN)
+    token = os.environ.get(f"{prefix}_BRIDGE_TOKEN") or DEFAULT_BRIDGE_TOKEN
     request = Request(
         url,
         data=json.dumps({"action": action, "params": params}).encode("utf-8"),
@@ -186,12 +190,37 @@ def call_bridge(action: str, params: dict[str, Any]) -> dict[str, Any]:
 
 def _bridge_error(error: HTTPError) -> RuntimeError:
     """Turn an HTTP error from the broker into an actionable RuntimeError."""
-    body = error.read().decode("utf-8", "replace").strip()
+    body = _read_error_body(error)
     try:
         payload = json.loads(body)
     except (ValueError, json.JSONDecodeError):
         payload = None
-    if isinstance(payload, dict) and "error" in payload:
-        return RuntimeError(str(payload["error"])[:MAX_ERROR_BODY_CHARS])
+    # A null or non-string error is worse than no error text at all: it used
+    # to surface as the message "None". Fall through to the status detail.
+    error_text = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error_text, str) and error_text.strip():
+        return RuntimeError(error_text.strip()[:MAX_ERROR_BODY_CHARS])
     detail = body[:MAX_ERROR_BODY_CHARS] or str(getattr(error, "reason", "") or "")
     return RuntimeError(f"CapCut bridge returned HTTP {error.code}: {detail}")
+
+
+def _read_error_body(error: HTTPError) -> str:
+    """Best-effort read of an HTTP error body; never raises.
+
+    An ``HTTPError`` doubles as a response object, but only when it actually
+    owns a file. On Python 3.7-3.9 an error built without one (``fp=None``)
+    has nothing to delegate to, so reading it raises ``KeyError: 'file'`` from
+    the ``urllib.response`` wrapper rather than returning an empty body.
+    Reading a broker error must not fail for that reason, so an unreadable
+    body degrades to the empty string and the caller falls back to the status
+    and reason.
+    """
+    if getattr(error, "fp", None) is None:
+        return ""
+    try:
+        raw = error.read(MAX_ERROR_BODY_BYTES)
+    except (AttributeError, KeyError, OSError, ValueError):
+        return ""
+    if not isinstance(raw, bytes):
+        return str(raw).strip()
+    return raw.decode("utf-8", "replace").strip()

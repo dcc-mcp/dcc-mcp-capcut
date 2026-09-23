@@ -79,14 +79,23 @@ def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
         }
     )
 
-    request = Request(
-        f"{bridge_url}/health",
-        headers={"X-DCC-MCP-Token": probe_token},
-        method="GET",
-    )
     try:
+        # Built inside the try: Request() rejects an unusable URL (e.g. an
+        # explicitly empty DCC_MCP_CAPCUT_BRIDGE_URL) before any socket is
+        # opened, and that verdict belongs in bridge_error, not in a raised
+        # exception -- callers use this as diagnostic evidence.
+        request = Request(
+            f"{bridge_url}/health",
+            headers={"X-DCC-MCP-Token": probe_token},
+            method="GET",
+        )
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - adapter-owned loopback URL
             health = json.loads(response.read().decode("utf-8"))
+        if not isinstance(health, dict):
+            # The doctor probes this endpoint while the port is held by another
+            # process, so a non-object reply is a real possibility, not a
+            # hypothetical one.
+            raise ValueError(f"unexpected /health payload: {type(health).__name__}")
         evidence["bridge_reachable"] = bool(health.get("ok"))
         evidence["panel_connected"] = bool(health.get("panel_connected"))
         evidence["bridge_health"] = health

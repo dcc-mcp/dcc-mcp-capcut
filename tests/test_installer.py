@@ -127,6 +127,39 @@ def test_verify_probes_health_with_the_default_token_when_unset(pin_platform, mo
     assert result["ready"] is False
 
 
+def test_verify_records_an_empty_bridge_url_as_evidence_not_an_exception(monkeypatch):
+    # An explicit empty DCC_MCP_CAPCUT_BRIDGE_URL makes Request() reject the
+    # URL before a socket is opened. That is diagnostic evidence, so it must
+    # land in bridge_error instead of escaping to the caller.
+    monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_URL", "")
+    monkeypatch.delenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", raising=False)
+
+    result = verify_installation()
+
+    assert result["bridge_reachable"] is False
+    assert result["bridge_error"]
+    assert "unknown url type" in result["bridge_error"]
+    assert result["ready"] is False
+
+
+@pytest.mark.parametrize("payload", [[], "hello", None])
+def test_verify_records_a_non_object_health_payload(monkeypatch, payload):
+    # The doctor probes /health precisely when the port is held by another
+    # process, so a non-object reply is realistic rather than hypothetical.
+    monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "secret")
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        return _Response(payload)
+
+    monkeypatch.setattr("dcc_mcp_capcut.installer.urlopen", fake_urlopen)
+
+    result = verify_installation()
+
+    assert result["bridge_reachable"] is False
+    assert "unexpected /health payload" in result["bridge_error"]
+    assert result["ready"] is False
+
+
 def test_verify_rejects_bridge_without_connected_panel(monkeypatch):
     monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "secret")
     monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_URL", "http://127.0.0.1:47410")

@@ -6,8 +6,15 @@
       "package-name": "dcc-mcp-capcut",
       "include-component-in-tag": false,
       "extra-files": [
-        "pyproject.toml",
-        "src/dcc_mcp_capcut/__version__.py",
+        {
+          "type": "toml",
+          "path": "pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "generic",
+          "path": "src/dcc_mcp_capcut/__version__.py"
+        },
         "src/dcc_mcp_capcut/skills/capcut-ai/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-asr/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-assemble/SKILL.md",

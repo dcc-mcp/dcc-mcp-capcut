@@ -5,7 +5,6 @@
       "release-type": "simple",
       "package-name": "dcc-mcp-capcut",
       "include-component-in-tag": false,
-      "release-as": "0.1.0",
       "extra-files": [
         "pyproject.toml",
         "src/dcc_mcp_capcut/__version__.py",

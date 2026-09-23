@@ -29,6 +29,12 @@ verify_archive = build_panel_archive.verify_archive
 
 PANEL_MEMBERS = sorted(f"{PANEL_PREFIX}/{name}" for name in FILES)
 
+# The archive version is an input to the builder, not this package's version:
+# the builder records whatever it is handed and never compares it to the
+# package. It is deliberately not a real release number so that a grep for
+# version literals cannot mistake it for a stale assertion about the package.
+SYNTHETIC_VERSION = "9.9.9"
+
 HOST_ACCEPTANCE = {
     "architecture": "x86_64",
     "compiler_abi": "msvc-14.3",
@@ -47,15 +53,15 @@ def test_panel_archive_is_deterministic_and_versioned(tmp_path):
     first = tmp_path / "first.zip"
     second = tmp_path / "second.zip"
 
-    build(first, "0.1.0")
-    build(second, "0.1.0")
+    build(first, SYNTHETIC_VERSION)
+    build(second, SYNTHETIC_VERSION)
 
     assert first.read_bytes() == second.read_bytes()
     with ZipFile(first) as archive:
         manifest = json.loads(archive.read(MANIFEST_NAME))
         # The pre-hash contract stays intact for existing consumers.
         assert manifest["adapter"] == "capcut"
-        assert manifest["version"] == "0.1.0"
+        assert manifest["version"] == SYNTHETIC_VERSION
         assert manifest["files"] == list(FILES)
         assert set(archive.namelist()) == {MANIFEST_NAME, *PANEL_MEMBERS}
 
@@ -73,7 +79,7 @@ def test_sha256_hex_matches_a_known_answer():
 
 def test_manifest_digests_match_the_archived_bytes(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
 
     manifest = read_manifest(archive_path)
     assert sorted(manifest["files_sha256"]) == PANEL_MEMBERS
@@ -97,7 +103,7 @@ def test_manifest_digests_track_panel_content(tmp_path, monkeypatch):
         "panel_payloads",
         lambda _panel: {f"{PANEL_PREFIX}/{name}": b"tampered" for name in FILES},
     )
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     tampered = read_manifest(archive_path)["files_sha256"]
 
     monkeypatch.setattr(
@@ -105,7 +111,7 @@ def test_manifest_digests_track_panel_content(tmp_path, monkeypatch):
         "panel_payloads",
         lambda _panel: {f"{PANEL_PREFIX}/{name}": original for name in FILES},
     )
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     restored = read_manifest(archive_path)["files_sha256"]
 
     assert tampered[f"{PANEL_PREFIX}/{FILES[0]}"] != restored[f"{PANEL_PREFIX}/{FILES[0]}"]
@@ -113,26 +119,26 @@ def test_manifest_digests_track_panel_content(tmp_path, monkeypatch):
 
 def test_host_acceptance_is_omitted_until_a_host_build_supplies_it(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     assert "host_acceptance" not in read_manifest(archive_path)
 
 
 def test_host_acceptance_is_embedded_when_supplied(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0", HOST_ACCEPTANCE)
+    build(archive_path, SYNTHETIC_VERSION, HOST_ACCEPTANCE)
     assert read_manifest(archive_path)["host_acceptance"] == HOST_ACCEPTANCE
 
 
 @pytest.mark.parametrize("host_acceptance", [None, HOST_ACCEPTANCE])
 def test_verify_accepts_a_freshly_built_archive(tmp_path, host_acceptance):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0", host_acceptance)
+    build(archive_path, SYNTHETIC_VERSION, host_acceptance)
     assert verify_archive(archive_path) == []
 
 
 def test_verify_rejects_a_tampered_member(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     member = f"{PANEL_PREFIX}/{FILES[0]}"
 
     with ZipFile(archive_path) as source:
@@ -148,7 +154,7 @@ def test_verify_rejects_a_tampered_member(tmp_path):
 
 def test_verify_rejects_a_member_missing_from_the_archive(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     member = f"{PANEL_PREFIX}/{FILES[0]}"
 
     with ZipFile(archive_path) as source:
@@ -165,14 +171,16 @@ def test_verify_rejects_a_member_missing_from_the_archive(tmp_path):
 def test_verify_flags_an_archive_without_digests(tmp_path):
     archive_path = tmp_path / "panel.zip"
     with ZipFile(archive_path, "w", ZIP_DEFLATED) as archive:
-        archive.writestr(MANIFEST_NAME, json.dumps({"adapter": "capcut", "version": "0.1.0"}))
+        archive.writestr(
+            MANIFEST_NAME, json.dumps({"adapter": "capcut", "version": SYNTHETIC_VERSION})
+        )
     problems = verify_archive(archive_path)
     assert any("no files_sha256 digests" in problem for problem in problems)
 
 
 def test_verify_flags_a_payload_with_no_recorded_digest(tmp_path):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
 
     with ZipFile(archive_path) as source:
         members = {name: source.read(name) for name in source.namelist()}
@@ -193,7 +201,7 @@ def test_verify_rejects_duplicate_members(tmp_path):
     different bytes for a consumer. Malformed wins over "the last one matches".
     """
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     member = f"{PANEL_PREFIX}/{FILES[0]}"
 
     with ZipFile(archive_path) as source:
@@ -218,7 +226,7 @@ def test_verify_reports_a_missing_manifest(tmp_path):
 
 def test_cli_verify_returns_a_nonzero_exit_code(tmp_path, capsys):
     archive_path = tmp_path / "panel.zip"
-    build(archive_path, "0.1.0")
+    build(archive_path, SYNTHETIC_VERSION)
     assert build_panel_archive.main(["--verify", str(archive_path)]) == 0
     assert "ok" in capsys.readouterr().out
 
@@ -234,4 +242,4 @@ def test_cli_verify_returns_a_nonzero_exit_code(tmp_path, capsys):
 
 def test_cli_build_requires_output_and_version():
     with pytest.raises(SystemExit):
-        build_panel_archive.main(["--version", "0.1.0"])
+        build_panel_archive.main(["--version", SYNTHETIC_VERSION])

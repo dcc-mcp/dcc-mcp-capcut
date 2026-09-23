@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from dcc_mcp_capcut.__version__ import __version__
+
 ROOT = Path(__file__).parents[1]
 SKILLS = ROOT / "src" / "dcc_mcp_capcut" / "skills"
 REFERENCES = SKILLS / "references"
@@ -86,7 +88,11 @@ def test_frontmatter_stays_stable_and_machine_readable(skill_dir):
 
     metadata = frontmatter["metadata"]["dcc-mcp"]
     assert metadata["dcc"] == "capcut"
-    assert metadata["version"] == "0.1.0"
+    # Release Please bumps the packaged skills and the package together, so
+    # this doubles as the regression test for that pairing: a skill left out of
+    # extra-files (or a release that only moved one of the two) fails here
+    # instead of shipping a wheel that disagrees with its own skills.
+    assert metadata["version"] == __version__
     assert metadata["layer"] in {"domain", "infrastructure"}
     assert metadata["stage"] in {"setup", "scene", "delivery"}
     assert isinstance(metadata["tags"], str) and metadata["tags"]

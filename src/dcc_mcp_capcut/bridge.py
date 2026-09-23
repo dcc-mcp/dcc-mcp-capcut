@@ -190,7 +190,7 @@ def call_bridge(action: str, params: dict[str, Any]) -> dict[str, Any]:
 
 def _bridge_error(error: HTTPError) -> RuntimeError:
     """Turn an HTTP error from the broker into an actionable RuntimeError."""
-    body = error.read(MAX_ERROR_BODY_BYTES).decode("utf-8", "replace").strip()
+    body = _read_error_body(error)
     try:
         payload = json.loads(body)
     except (ValueError, json.JSONDecodeError):
@@ -199,3 +199,25 @@ def _bridge_error(error: HTTPError) -> RuntimeError:
         return RuntimeError(str(payload["error"])[:MAX_ERROR_BODY_CHARS])
     detail = body[:MAX_ERROR_BODY_CHARS] or str(getattr(error, "reason", "") or "")
     return RuntimeError(f"CapCut bridge returned HTTP {error.code}: {detail}")
+
+
+def _read_error_body(error: HTTPError) -> str:
+    """Best-effort read of an HTTP error body; never raises.
+
+    An ``HTTPError`` doubles as a response object, but only when it actually
+    owns a file. On Python 3.7-3.9 an error built without one (``fp=None``)
+    has nothing to delegate to, so reading it raises ``KeyError: 'file'`` from
+    the ``urllib.response`` wrapper rather than returning an empty body.
+    Reading a broker error must not fail for that reason, so an unreadable
+    body degrades to the empty string and the caller falls back to the status
+    and reason.
+    """
+    if getattr(error, "fp", None) is None:
+        return ""
+    try:
+        raw = error.read(MAX_ERROR_BODY_BYTES)
+    except (AttributeError, KeyError, OSError, ValueError):
+        return ""
+    if not isinstance(raw, bytes):
+        return str(raw).strip()
+    return raw.decode("utf-8", "replace").strip()

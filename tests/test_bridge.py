@@ -1,3 +1,4 @@
+import io
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -123,12 +124,33 @@ def test_bridge_token_treats_an_empty_env_value_as_unset(monkeypatch, env_token,
 
     def fake_urlopen(request, *_args, **_kwargs):
         sent["token"] = request.get_header("X-dcc-mcp-token")
-        raise HTTPError("http://127.0.0.1", 503, "Service Unavailable", {}, None)
+        # A real file object, the way urlopen builds it: HTTPError doubles as
+        # the response, so the body has to be readable.
+        raise HTTPError("http://127.0.0.1/call", 503, "Service Unavailable", {}, io.BytesIO(b"{}"))
 
     monkeypatch.setattr("dcc_mcp_capcut.bridge.urlopen", fake_urlopen)
     with pytest.raises(RuntimeError):
         call_bridge("inspect_project", {})
     assert sent["token"] == expected
+
+
+def test_call_bridge_survives_an_http_error_with_no_readable_body(monkeypatch):
+    # Python 3.7-3.9 give HTTPError no file to delegate to when it is built
+    # with fp=None, so reading the body raises KeyError: 'file' out of the
+    # urllib.response wrapper. Reading a broker error must never fail for that
+    # reason: the caller still gets the status instead of an unrelated traceback.
+    error = HTTPError("http://127.0.0.1/call", 503, "Service Unavailable", {}, None)
+    error.fp = None
+    error.__dict__.pop("file", None)
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr("dcc_mcp_capcut.bridge.urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match=r"HTTP 503: Service Unavailable") as raised:
+        call_bridge("inspect_project", {})
+    assert "KeyError" not in str(raised.value)
 
 
 def test_call_bridge_names_the_status_when_the_body_is_not_error_json(monkeypatch):

@@ -6,21 +6,15 @@
       "package-name": "dcc-mcp-capcut",
       "include-component-in-tag": false,
       "extra-files": [
-        "pyproject.toml",
-        "src/dcc_mcp_capcut/__version__.py",
-        "src/dcc_mcp_capcut/skills/capcut-ai/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-asr/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-assemble/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-audio/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-effects/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-export/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-interchange/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-media/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-native/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-project/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-setup/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-text/SKILL.md",
-        "src/dcc_mcp_capcut/skills/capcut-timeline/SKILL.md"
+        {
+          "type": "toml",
+          "path": "pyproject.toml",
+          "jsonpath": "$.project.version"
+        },
+        {
+          "type": "generic",
+          "path": "src/dcc_mcp_capcut/__version__.py"
+        }
       ]
     }
   }

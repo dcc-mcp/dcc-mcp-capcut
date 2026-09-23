@@ -5,7 +5,7 @@ license: MIT
 compatibility: "CapCut Desktop; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.1.0", layer: domain, stage: scene, tags: "capcut, timeline, edit", tools: tools.yaml}
+  dcc-mcp: {dcc: capcut, version: "0.1.0", layer: domain, stage: scene, tags: "capcut, timeline, edit", tools: tools.yaml}  # x-release-please-version
 ---
 
 Timeline assembly and clip editing. This is the most state-dependent skill in

@@ -20,6 +20,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .bridge import DEFAULT_BRIDGE_TOKEN
 from .hosts import PACKAGE_ID, WINDOWS_FLAVORS, WINGET_COMMAND, HostFlavor, get_provider
 from .hosts.windows import WindowsHostFlavor
 
@@ -57,13 +58,18 @@ def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
     """Verify the executable, exact host binding, broker, and panel lease."""
     evidence = dict(detect_installation())
     bridge_url = os.environ.get("DCC_MCP_CAPCUT_BRIDGE_URL", "http://127.0.0.1:47410").rstrip("/")
-    token = os.environ.get("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "")
+    configured_token = os.environ.get("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "")
+    # The health probe uses the same default as call_bridge. Without the
+    # fallback an unset token skipped the probe entirely and reported
+    # bridge_reachable=false with a null error, which reads as "bridge down"
+    # when the bridge is in fact up on the documented default token.
+    probe_token = configured_token or DEFAULT_BRIDGE_TOKEN
     pid = _positive_int(os.environ.get("DCC_MCP_CAPCUT_PID"))
     window_handle = _positive_int(os.environ.get("DCC_MCP_CAPCUT_WINDOW_HANDLE"))
     evidence.update(
         {
             "bridge_url": bridge_url,
-            "bridge_token_configured": bool(token),
+            "bridge_token_configured": bool(configured_token),
             "dcc_pid": pid,
             "dcc_window_handle": window_handle,
             "exact_window_bound": bool(pid and window_handle),
@@ -73,27 +79,26 @@ def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
         }
     )
 
-    if token:
-        request = Request(
-            f"{bridge_url}/health",
-            headers={"X-DCC-MCP-Token": token},
-            method="GET",
-        )
-        try:
-            with urlopen(request, timeout=timeout) as response:  # noqa: S310 - adapter-owned loopback URL
-                health = json.loads(response.read().decode("utf-8"))
-            evidence["bridge_reachable"] = bool(health.get("ok"))
-            evidence["panel_connected"] = bool(health.get("panel_connected"))
-            evidence["bridge_health"] = health
-        except (
-            HTTPError,
-            URLError,
-            OSError,
-            TimeoutError,
-            ValueError,
-            json.JSONDecodeError,
-        ) as error:
-            evidence["bridge_error"] = f"{type(error).__name__}: {error}"
+    request = Request(
+        f"{bridge_url}/health",
+        headers={"X-DCC-MCP-Token": probe_token},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - adapter-owned loopback URL
+            health = json.loads(response.read().decode("utf-8"))
+        evidence["bridge_reachable"] = bool(health.get("ok"))
+        evidence["panel_connected"] = bool(health.get("panel_connected"))
+        evidence["bridge_health"] = health
+    except (
+        HTTPError,
+        URLError,
+        OSError,
+        TimeoutError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
+        evidence["bridge_error"] = f"{type(error).__name__}: {error}"
 
     evidence["ready"] = bool(
         evidence["installed"]

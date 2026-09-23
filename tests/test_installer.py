@@ -15,6 +15,7 @@ from random import Random
 import pytest
 
 from dcc_mcp_capcut import hosts
+from dcc_mcp_capcut.bridge import DEFAULT_BRIDGE_TOKEN
 from dcc_mcp_capcut.hosts import LINUX, MACOS, WINDOWS, get_provider
 from dcc_mcp_capcut.installer import HOST_FLAVORS, installation_plan, verify_installation
 
@@ -91,7 +92,37 @@ def test_installation_plan_is_reviewable_and_does_not_execute(pin_platform):
 def test_verify_reports_not_ready_without_install_and_secret(pin_platform, monkeypatch):
     pin_platform("linux")
     monkeypatch.delenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", raising=False)
+    # The probe now always runs; keep this test off the real loopback port.
+    monkeypatch.setattr(
+        "dcc_mcp_capcut.installer.urlopen",
+        lambda *_args, **_kwargs: _Response({"ok": True, "panel_connected": True}),
+    )
     result = verify_installation()
+    assert result["bridge_token_configured"] is False
+    assert result["ready"] is False
+
+
+def test_verify_probes_health_with_the_default_token_when_unset(pin_platform, monkeypatch):
+    # An unset token used to skip the probe entirely, so a running bridge was
+    # reported as unreachable with a null error. The probe must use the same
+    # default token call_bridge uses.
+    pin_platform("linux")
+    monkeypatch.delenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", raising=False)
+    sent = {}
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        sent["token"] = request.get_header("X-dcc-mcp-token")
+        return _Response({"ok": True, "panel_connected": False})
+
+    monkeypatch.setattr("dcc_mcp_capcut.installer.urlopen", fake_urlopen)
+
+    result = verify_installation()
+
+    assert sent["token"] == DEFAULT_BRIDGE_TOKEN
+    assert result["bridge_reachable"] is True
+    assert result["panel_connected"] is False
+    assert result["bridge_error"] is None
+    # A default token is not operator configuration, so readiness stays false.
     assert result["bridge_token_configured"] is False
     assert result["ready"] is False
 

@@ -70,8 +70,20 @@ def load_descriptor(skill_dir: Path) -> dict:
 
 
 def significant_words(text: str) -> set[str]:
-    """Lowercase words long enough to carry meaning, punctuation aside."""
-    return {word for word in re.findall(r"[a-z]+", text.lower()) if len(word) >= 4}
+    """Lowercased words that carry a capability claim, punctuation aside.
+
+    Words of four letters or more always count. Shorter tokens count only when
+    they are written as an acronym in the source: ``SRT``, ``EDL`` and ``API``
+    are capability claims, while ``and``, ``the`` and ``for`` are not. That is
+    why a bare length floor is not enough -- a three-letter acronym would sail
+    straight through and let a descriptor advertise a capability the
+    frontmatter never states.
+    """
+    return {
+        token.lower()
+        for token in re.findall(r"[A-Za-z]+", text)
+        if len(token) >= 4 or token.isupper()
+    }
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda path: path.name)
@@ -115,6 +127,20 @@ def test_short_description_claims_nothing_new(skill_dir):
         f"{skill_dir.name}: short_description introduces {sorted(introduced)}, "
         "which the SKILL.md description never claims"
     )
+
+
+@pytest.mark.parametrize("acronym", ["SRT", "EDL", "API", "XML"])
+def test_short_acronyms_are_held_to_the_same_subset_rule(acronym):
+    """A three-letter acronym is a capability claim, not boilerplate.
+
+    Guards the guard: the subset check keeps words of four letters or more, so
+    an acronym short enough to dodge that floor would otherwise let a
+    descriptor advertise something the frontmatter never mentions.
+    """
+    frontmatter = "Add styled text and captions to the timeline."
+    descriptor = f"Edit {acronym} files on the timeline"
+    assert acronym.lower() in significant_words(descriptor)
+    assert significant_words(descriptor) - significant_words(frontmatter)
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda path: path.name)

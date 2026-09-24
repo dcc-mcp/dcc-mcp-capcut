@@ -41,6 +41,7 @@ try:
         plan_from_otio,
         plan_to_actions,
         plan_to_edl,
+        relative_media,
     )
     from dcc_mcp_capcut.editplan import resolve_referenced_files as _resolve_referenced_files
     from dcc_mcp_capcut.interchange import export_otio
@@ -91,7 +92,20 @@ def declared_paths(manifest: dict) -> list[str]:
         for field in ("id", "path", "kind", "license"):
             if not asset.get(field):
                 raise HandoffError(f"assets[{index}] is missing required field {field!r}")
-        path = asset["path"]
+
+        # Portability is enforced here, on every declared path, and not only on
+        # the subset the plan happens to reference. The manifest is the input a
+        # downstream copy of this example would feed straight to the filesystem
+        # -- materialize() writes to these paths -- so an unvalidated absolute
+        # or traversing path would write outside the delivery root before
+        # reconcile() ever got a chance to reject the delivery.
+        try:
+            path = relative_media(asset["path"])
+        except ValueError as exc:
+            raise HandoffError(
+                f"assets[{index}] declares a non-portable path {asset['path']!r}: {exc}"
+            ) from exc
+
         if path in seen:
             raise HandoffError(f"assets[{index}] repeats the path {path!r}")
         seen.add(path)
@@ -211,6 +225,12 @@ def run(
         "media_dir": str(media_dir),
         "manifest_schema": manifest["schema"],
     }
+
+    # Validate every declared path before writing any of them. materialize()
+    # creates files at those paths, so validating afterwards would let a
+    # traversing or absolute path write outside the delivery root on its way to
+    # being rejected. declared_paths() is the check that makes that impossible.
+    declared_paths(manifest)
 
     if materialize_placeholders:
         verdict["placeholders_created"] = materialize(manifest, media_dir)

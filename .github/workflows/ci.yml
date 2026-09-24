@@ -76,6 +76,48 @@ jobs:
           python -m pip install --disable-pip-version-check build twine
           python -m build
           python -m twine check dist/*
+      - name: Verify the wheel carries every packaged skill surface
+        # The pytest assertions that compare the packaged copy against the
+        # source run under an editable install, where importlib.resources
+        # resolves to the source tree -- so they compare a file with itself and
+        # cannot notice a wheel missing these files. Checking the built wheel
+        # here is what actually guards the artifacts glob in pyproject.toml.
+        run: |
+          python - <<'PY'
+          import glob
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          wheels = sorted(glob.glob("dist/*.whl"))
+          if len(wheels) != 1:
+              sys.exit(f"expected exactly one wheel, found {wheels}")
+          names = zipfile.ZipFile(wheels[0]).namelist()
+
+          skills = Path("src/dcc_mcp_capcut/skills")
+          problems = []
+
+          # One agent interface descriptor per bundled skill, byte-identical.
+          for skill_dir in sorted(p for p in skills.glob("capcut-*") if p.is_dir()):
+              member = f"dcc_mcp_capcut/skills/{skill_dir.name}/agents/openai.yaml"
+              if member not in names:
+                  problems.append(f"{member} is missing from the wheel")
+                  continue
+              shipped = zipfile.ZipFile(wheels[0]).read(member)
+              source = (skill_dir / "agents" / "openai.yaml").read_bytes()
+              if shipped != source:
+                  problems.append(f"{member} does not match the source tree")
+
+          # The shared references an agent reads, including the handoff format.
+          for reference in sorted((skills / "references").glob("*.md")):
+              member = f"dcc_mcp_capcut/skills/references/{reference.name}"
+              if member not in names:
+                  problems.append(f"{member} is missing from the wheel")
+
+          if problems:
+              sys.exit("\n".join(problems))
+          print(f"{len(names)} members checked; every skill surface is packaged")
+          PY
       - name: Read the version the sources declare
         id: version
         # The panel version used to be the literal 0.1.0, which both pinned the

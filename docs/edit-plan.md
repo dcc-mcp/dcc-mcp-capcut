@@ -99,7 +99,7 @@ Background and the spike that settled the assembly direction:
 | `tracks` | yes | Non-empty. Ordered bottom to top, as in OTIO. |
 | `captions` | no | Inline captions; ignored by assembly when `subtitles` is non-empty. |
 | `subtitles` | no | SRT/LRC/ASS files to import as editable text tracks, one track each. |
-| `output` | no | Delivery path and aspect ratio. |
+| `output` | no | Delivery path, aspect ratio, reframing policy and encode preset. |
 
 Track: `name`, `kind` (`Video` or `Audio`), `clips`.
 
@@ -112,6 +112,25 @@ Subtitle: `file`, optional `format`, `offset`, `language`, `style`, `align` and
 `output_path`. `subtitle` (a single object) is accepted as an alias for a
 one-element `subtitles` list; the canonical document always carries the list,
 and supplying both is an error rather than a union.
+
+### Output
+
+`output` is where a plan says how it is delivered. All four fields are
+optional, and an `output` block that is present must carry at least one:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | Destination for `export_video`. Required by assembly when `export: true`. |
+| `aspect_ratio` | A `W:H` statement of the canvas. Must agree with `width`/`height`. |
+| `reframe` | How the delivery canvas relates to the framing the plan was authored for. |
+| `export` | Encode preset: `format`, `codec`, `bitrate_mbps`, `fps`, `audio`, and `width`/`height` for a delivery size smaller than the canvas. |
+
+`reframe` and `export` are consumed by the assembly and batch links and are
+dropped by `plan_to_edl` along with every other presentation field. The
+arithmetic they describe is computed by `batch.resolve_reframe` and
+`batch.resolve_export`; the plan itself only carries the declaration, so one
+document still means one thing to every consumer. See
+[`docs/batch-and-templates.md`](batch-and-templates.md).
 
 ## Units
 

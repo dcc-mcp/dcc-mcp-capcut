@@ -609,6 +609,11 @@ class FakeHost:
         self.stalled_jobs = set(stalled_jobs)
         self.exports = 0
         self.polls: list[str] = []
+        self.destinations: dict[str, str] = {}
+        # Per-job fields merged into the receipt, to make an honest-looking
+        # receipt that is wrong in one field. ``path`` is the interesting one:
+        # it lets a host describe a different artifact than it was given.
+        self.receipt_overrides: dict[str, dict] = {}
 
     def __call__(self, action, params, **_kwargs):
         self.calls.append((action, params))
@@ -632,9 +637,14 @@ class FakeHost:
             path = params["output_path"]
             if path in self.omit_job_id_for:
                 return {"verification": {"ok": True}, "output_path": path}
+            job_id = f"job-{self.exports}"
+            # The destination each job was submitted for, so the receipt this
+            # host hands back describes the artifact the item asked for -- a
+            # receipt for a different path has to fail the item, not pass it.
+            self.destinations[job_id] = path
             return {
                 "verification": {"ok": True},
-                "job_id": f"job-{self.exports}",
+                "job_id": job_id,
                 "output_path": path,
             }
         if action == "get_export_status":
@@ -647,13 +657,14 @@ class FakeHost:
                 result["verification"] = {"ok": True}
                 if params["job_id"] not in self.no_receipt_for:
                     result["verification"]["output"] = {
-                        "path": f"out/{params['job_id']}.mp4",
+                        "path": self.destinations[params["job_id"]],
                         "exists": True,
                         "size_bytes": 2048,
                         "duration_sec": 8.0,
                         "streams": [
                             {"kind": "video", "codec": "h264", "width": 1080, "height": 1920}
                         ],
+                        **self.receipt_overrides.get(params["job_id"], {}),
                     }
             return result
         return {"verification": {"ok": True, "timeline": TIMELINE}}
@@ -699,12 +710,14 @@ def test_a_batch_delivers_every_item_and_receipts_each_one(run_skill, media_dir,
 
     assert context["counts"] == {"pending": 0, "running": 0, "done": 3, "failed": 0, "skipped": 0}
     assert context["complete"] is True
-    # One receipt per item, and each is the host's own object for that job.
+    # One receipt per item, each bound to the destination that item asked for:
+    # a host handing back another item's probe must fail, not pass.
     assert [item["receipt"]["path"] for item in context["items"]] == [
-        "out/job-1.mp4",
-        "out/job-2.mp4",
-        "out/job-3.mp4",
+        "out/promo_en_16:9.mp4",
+        "out/promo_zh_9:16.mp4",
+        "out/promo_de_1:1.mp4",
     ]
+    assert all(item["receipt"]["exists"] for item in context["items"])
     assert manifest.is_file()
 
 
@@ -830,7 +843,56 @@ def test_a_missing_receipt_fails_the_item_when_verification_is_asked_for(
     )
 
     assert context["items"][1]["state"] == "failed"
-    assert "no artifact receipt" in context["items"][1]["error"]
+    # The message is the receipt contract's own: it names the action and the
+    # field, so an operator looking at one failed item knows what is missing.
+    assert "verification.output" in context["items"][1]["error"]
+    # The items around it are unaffected.
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+
+
+def test_a_receipt_for_another_artifact_fails_the_item(run_skill, media_dir, tmp_path):
+    """The batch-only part of the receipt check.
+
+    A single export binds the receipt to the ``output_path`` the same result
+    carries, and ``get_export_status`` usually carries none -- so a host that
+    reports a perfectly well-formed receipt for the *previous* item would pass
+    every field check. Batch knows the destination each item asked for, so it
+    binds the receipt to it and refuses the mismatch.
+    """
+    run_skill.host.receipt_overrides = {
+        "job-2": {"path": "out/promo_en_16:9.mp4"}  # the previous item's render
+    }
+
+    context = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(tmp_path / "batch.json"),
+        )
+    )
+
+    assert context["items"][1]["state"] == "failed"
+    assert "was asked to produce" in context["items"][1]["error"]
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+
+
+def test_a_receipt_for_a_missing_file_fails_the_item(run_skill, media_dir, tmp_path):
+    # A receipt that does not prove the file exists is not a receipt -- the
+    # exact failure that per-item receipts exist to catch in a batch.
+    run_skill.host.receipt_overrides = {"job-2": {"exists": False, "size_bytes": 0}}
+
+    context = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(tmp_path / "batch.json"),
+        )
+    )
+
+    assert context["items"][1]["state"] == "failed"
+    assert "does not prove the artifact exists" in context["items"][1]["error"]
 
 
 def test_without_verification_the_hosts_word_is_accepted(run_skill, media_dir, tmp_path):
@@ -1007,6 +1069,7 @@ def test_batch_status_reads_the_manifest_back(run_skill, media_dir, tmp_path):
     assert context["counts"]["done"] == 3
     assert len(context["plans"]) == 3
     assert context["items"][1]["receipt"]["size_bytes"] == 2048
+    assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
 
 
 def test_batch_status_requires_a_path():

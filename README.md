@@ -36,8 +36,8 @@ installs anything: every plan still goes through the operator-owned
 The bundled skills cover project lifecycle/settings, media import/relink and
 proxies, timeline/clip editing, transitions, text and auto-captions, audio
 mixing/fades, effects and color, AI helpers (background removal/stabilization),
-video/thumbnail export, one-call assembly of a whole edit plan, and a complete
-`build_vlog_demo` recipe.
+video/thumbnail export, one-call assembly of a whole edit plan, batch production
+from a template, and a complete `build_vlog_demo` recipe.
 
 ### Export receipt
 
@@ -121,6 +121,41 @@ an ordered action script. Use `dry_run: true` to inspect that script without
 dispatching anything. See
 [ADR 0002](docs/adr/0002-canonical-edit-plan-and-assembly.md) for the spike
 behind it.
+
+## Batch production from a template
+
+One template plus N variable sets becomes N renders. The template is an ordinary
+plan or recipe carrying `{{placeholder}}` fields, so every variant is validated
+by the same rules as a hand-written plan. `render_batch_template` takes the two
+and returns every compiled plan, reframe report and encode preset, host-free:
+
+```json
+{
+  "template": {
+    "schema": "capcut-vlog-recipe/v1",
+    "project_name": "promo {{lang}} {{aspect}}",
+    "aspect_ratio": "{{aspect}}",
+    "output_path": "out/promo_{{lang}}_{{aspect}}.mp4",
+    "media": [{"id": "a", "path": "clips/{{lang}}/a.mp4", "start": 0, "duration": "{{length}}"}],
+    "reframe": {"fit": "contain", "source_aspect_ratio": "16:9"},
+    "export": {"codec": "h264", "bitrate_mbps": 12}
+  },
+  "variables": [
+    {"lang": "en", "aspect": "16:9", "length": 8},
+    {"lang": "zh", "aspect": "9:16", "length": 8}
+  ]
+}
+```
+
+`run_batch` then assembles and exports each item in turn, writing a manifest
+after every one and reporting a receipt per delivered item. Failures are
+isolated to the item that earned them, and a batch is resumable from its
+manifest with `resume: true`. Reframing is declared and reported, never applied
+silently: `cover` requires a `safe_area`, and a crop that would eat it is an
+error rather than a warning.
+
+Rendering is sequential and needs the visible, bound CapCut window for the whole
+run. See [docs/batch-and-templates.md](docs/batch-and-templates.md).
 
 ## Portable OpenTimelineIO export
 

@@ -45,6 +45,11 @@ from dcc_mcp_capcut.batch import (
     summarize,
 )
 from dcc_mcp_capcut.editplan import plan_to_actions
+from dcc_mcp_capcut.export_receipt import (
+    RECEIPT_KEY,
+    VERIFY_OUTPUT_PARAM,
+    validate_export_receipt,
+)
 
 # Injected rather than called directly so a batch of forty items can be driven
 # to completion in a test without spending forty render times asleep.
@@ -91,30 +96,35 @@ def _await_export(
         sleep(poll_interval_secs)
 
 
-def _read_receipt(job_id: str, *, verify_output: bool) -> Optional[dict[str, Any]]:
-    """Ask once for the artifact receipt, and require an answer.
+def _read_receipt(
+    job_id: str, *, output_path: str, verify_output: bool
+) -> Optional[dict[str, Any]]:
+    """Ask once for the artifact receipt, and require a real one.
 
     Batch delivery is exactly the case the export receipt exists for: forty
     renders whose only proof is "the host said done" is forty chances to ship a
-    missing or truncated file. So the receipt is requested and its absence is a
-    failed item, not a warning.
+    missing, empty or wrongly sized file. So the receipt is requested, and an
+    absent one fails the item rather than warning about it.
 
-    The field rules themselves are owned by the export-receipt contract, which
-    validates the same object a single export returns; this deliberately does
-    not re-implement them, so there is one owner of what a receipt means.
+    The receipt is also **bound to this item's destination**: without that, a
+    host could hand back the previous item's probe and every field check would
+    still pass. The field rules are not re-implemented here -- ``export_receipt``
+    owns them, and validating through it is what makes one batch item's proof
+    the same proof a single export gives.
     """
     if not verify_output:
         return None
-    final = dispatch("get_export_status", {"job_id": job_id, "verify_output": True})
-    receipt = (final.get("verification") or {}).get("output")
+    params = {"job_id": job_id, VERIFY_OUTPUT_PARAM: True}
+    final = dispatch("get_export_status", params)
+    receipt = (final.get("verification") or {}).get(RECEIPT_KEY)
     if receipt is None:
         raise RuntimeError(
             f"export job {job_id!r} reached a terminal state but returned no artifact "
-            "receipt under verification.output, so the render cannot be proven. Check "
-            "the file at output_path yourself, or run the batch with verify_output=false "
-            "to accept the host's word."
+            f"receipt under verification.{RECEIPT_KEY}, so the render cannot be proven. "
+            "Check the file at output_path yourself, or run the batch with "
+            "verify_output=false to accept the host's word."
         )
-    return receipt
+    return validate_export_receipt("export_video", receipt, expected_path=output_path)
 
 
 def _run_item(
@@ -176,7 +186,9 @@ def _run_item(
                 f"export job {job_id!r} finished in state {state!r} instead of "
                 f"{SUCCESS_EXPORT_STATE!r}"
             )
-        receipt = _read_receipt(job_id, verify_output=verify_output)
+        receipt = _read_receipt(
+            job_id, output_path=item["output_path"], verify_output=verify_output
+        )
         complete_item(manifest, index, timeline_id=timeline_id, job_id=job_id, receipt=receipt)
     except (RuntimeError, OSError, ValueError) as error:
         fail_item(manifest, index, error)

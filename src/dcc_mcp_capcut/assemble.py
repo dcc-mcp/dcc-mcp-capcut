@@ -39,8 +39,12 @@ def dispatch(action: str, params: dict[str, Any]) -> dict[str, Any]:
     two steps, and skipping the second one is how a half-truth becomes a
     reported success -- so the pair lives here instead of being re-typed in each
     script.
+
+    The request is handed to the contract alongside the result: the opt-in
+    ``verify_output`` flag is only meaningful to a caller that knows both what
+    was asked for and what came back.
     """
-    return validate_host_result(action, call_bridge(action, params))
+    return validate_host_result(action, call_bridge(action, params), params=params)
 
 
 def capture_ids(action: str, result: dict[str, Any], step: dict[str, Any]) -> dict[str, str]:
@@ -91,7 +95,7 @@ def run_composed_script(script: dict[str, Any]) -> dict[str, Any]:
         action = step["action"]
         params = substitute_placeholders(step["params"], ids)
         try:
-            result = validate_host_result(action, call_bridge(action, params))
+            result = validate_host_result(action, call_bridge(action, params), params=params)
         except (RuntimeError, OSError) as error:
             raise RuntimeError(
                 f"apply_edit_plan stopped at step {len(executed)} ({action}): {error}. "
@@ -125,7 +129,9 @@ def run_composed_script(script: dict[str, Any]) -> dict[str, Any]:
 def run_host_plan(plan: dict[str, Any], script: dict[str, Any], media_dir: str) -> dict[str, Any]:
     """Hand the whole plan to the host in one ``apply_edit_plan`` action."""
     payload = {"plan": plan, "media_dir": media_dir, "script": script}
-    result = validate_host_result("apply_edit_plan", call_bridge("apply_edit_plan", payload))
+    result = validate_host_result(
+        "apply_edit_plan", call_bridge("apply_edit_plan", payload), params=payload
+    )
     # Only the fields the contract guarantees are spread into the tool result.
     # The rest of the receipt is nested: a host is free to echo back the `plan`
     # or `script` it received, and spreading that straight into the result would

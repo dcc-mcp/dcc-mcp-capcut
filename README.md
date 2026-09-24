@@ -12,9 +12,16 @@ Windows paths:
 
 | Platform | Discovery | Install plan | Doctor `capcut_executable` |
 | --- | --- | --- | --- |
-| Windows | `CapCut.exe` / `JianyingPro.exe` under `%LOCALAPPDATA%\<app>\Apps` and `%PROGRAMFILES%\<app>` | exact `winget install` command | `ok` / `fail` |
+| Windows | `CapCut.exe` / `JianyingPro.exe` under `%LOCALAPPDATA%\<app>\Apps` and `%PROGRAMFILES%\<app>`, with the file version read from the `.exe`'s `VS_VERSIONINFO` resource | exact `winget install` command | `ok` / `fail` |
 | macOS | `CapCut.app` / `JianyingPro.app` under `/Applications` and `~/Applications`, with the `Info.plist` bundle version | `brew install --cask capcut`, or the official download page where no cask exists | `ok` / `fail` |
 | Linux | none | none; `status: unsupported` with the reason | `skip`, reported as `unsupported` |
+
+Each provider also reports the host build it found -- the Windows `.exe`
+version resource, the macOS `Info.plist` bundle version -- and grades it against
+the machine-readable matrix in `src/dcc_mcp_capcut/hosts/versions.py`. A build
+that was read but is unlisted is a `warn` naming the version, never a silent
+pass; a build whose version could not be read is a separate `warn`, because
+"could not read" and "read and untested" are different facts.
 
 ByteDance publishes no official Linux client, so Linux reports an explicit
 conclusion instead of an empty "not installed" that could be mistaken for a

@@ -107,24 +107,42 @@ must not be reported as success.
 
 ### Opt-in export receipt: `verify_output`
 
-`export_video`, `export_thumbnail`, `get_export_status` and `build_vlog_demo`
-accept an optional `verify_output` flag. It defaults to `false`, and while it is
-`false` the host owes nothing beyond what it returns today.
+`export_thumbnail` and `get_export_status` accept an optional `verify_output`
+flag. It defaults to `false`, and while it is `false` the host owes nothing
+beyond what it returns today.
+
+`export_video` and `build_vlog_demo` do **not** take the flag. They submit
+asynchronously and return a job acknowledgement, so the artifact does not exist
+when they return — the receipt for a rendered video comes from
+`get_export_status` once the job reaches a terminal state.
 
 When a caller passes `verify_output: true`, the host must probe the rendered
 file itself and return the receipt under `verification.output`: `path`,
 `exists: true`, `size_bytes`, `duration_sec` (timed media only) and a non-empty
-`streams` list with at least one `video` or `image` stream. The full field table
-is normative in `skills/references/export-and-verification.md`; the adapter
-rejects an absent or incomplete receipt rather than filling it in.
+`streams` list. `verification.ok` must be `true` on the same result, including
+on `get_export_status`, which is read-only and otherwise exempt from every
+readback rule. The full field table is normative in
+`skills/references/export-and-verification.md`; the adapter rejects an absent or
+incomplete receipt rather than filling it in.
 
-Two rules catch the mistakes that make a receipt worthless:
+Four rules catch the mistakes that make a receipt worthless:
 
 - Report what the probe found, not what the export asked for. Restating the
   requested width and height is not a probe, and a `duration_sec` copied from
   the timeline while the file is truncated is worse than no receipt.
-- A still has no duration. `export_thumbnail` returns one `image` stream and
-  omits `duration_sec`; supplying one is rejected.
+- Probe **this** artifact. When the result carries an `output_path`, the
+  receipt's `path` must describe that same file. A stale probe from an earlier
+  render, or the previous item in a batch, is rejected — which is the point,
+  because every other field check would pass on it. Separator style,
+  drive-letter case and relative paths are normalised away first, so an honest
+  host is not rejected over spelling.
+- Match the picture to the action. `export_thumbnail` renders a still: one
+  `image` stream, no `video` or `audio` stream, no `duration_sec`.
+  `get_export_status` may report either a `video` or an `image` stream, because
+  it only holds a `job_id` and cannot know in advance.
+- Numbers must be finite. `NaN` and `Infinity` are rejected: `json.loads`
+  accepts those literals, so forwarding an `ffprobe` field reported as `N/A`
+  would otherwise slip a non-value past every range check.
 
 The adapter never synthesises this receipt and never probes the file itself, so
 a host that cannot probe should simply not be called with the flag rather than

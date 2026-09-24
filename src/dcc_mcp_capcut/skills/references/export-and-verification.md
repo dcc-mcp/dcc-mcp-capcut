@@ -123,14 +123,31 @@ Other rules for reading a job out:
 
 The default export contract proves only that a job was accepted. A caller that
 wants proof about the artifact asks for it: pass `verify_output: true` to
-`export_video`, `export_thumbnail`, `get_export_status`, or `build_vlog_demo`.
+`export_thumbnail` or `get_export_status`.
+
+**The asynchronous submits do not take the flag.** `export_video` and
+`build_vlog_demo` return a job acknowledgement and the artifact does not exist
+when they return, so a receipt cannot be demanded of them — doing so would cost
+the caller the `job_id` it needs to poll. Read a video export out with
+`get_export_status(verify_output: true)` once the job reaches a terminal state.
 
 The flag is strictly opt-in and defaults to `false`, so a caller that never
 passes it keeps exactly the contract it has today. When it is passed, the host
 must probe the rendered file and return the receipt under
 `verification.output`, and the adapter fails closed when the receipt is missing
-or incomplete. `get_export_status` is read-only, so this receipt is the only
-contract rule that ever applies to it.
+or incomplete.
+
+Two rules apply to every opted-in call, including the read-only one:
+
+- `verification.ok` must be `true`. `get_export_status` is exempt from the
+  mutation rules, but a receipt sitting under a readback the host did not vouch
+  for is not evidence. It gets its own error text rather than the mutation
+  wording, since "post-operation readback" points the wrong way for a poll.
+- When the result also carries an `output_path`, the receipt's `path` must
+  describe that same file. Paths are compared after `os.path.normcase` +
+  `os.path.abspath`, so separator style, drive-letter case and relative paths
+  do not reject an honest host — but a stale probe from an earlier render, or
+  the previous item in a batch, cannot stand in for this one.
 
 The adapter never synthesises a receipt and never probes the file itself:
 duration and stream facts come from a probe the **host** runs (`ffprobe` or an
@@ -144,8 +161,8 @@ must be able to decline instead of failing every export for every caller.
 | `path` | string | yes | Non-empty path of the artifact that was probed. |
 | `exists` | boolean | yes | Must be `true`. A receipt for a file that is not on disk is not a receipt. |
 | `size_bytes` | integer | yes | Size on disk. Must be `>= 1`; a zero-byte file is a failed render. |
-| `duration_sec` | number or null | conditional | Duration. Must be `> 0` when any stream is `video` or `audio`; must be omitted or `null` otherwise. |
-| `streams` | array | yes | Non-empty list of stream objects; at least one must be `video` or `image`. |
+| `duration_sec` | number or null | conditional | Duration. Must be a **finite** number `> 0` when any stream is `video` or `audio`; must be omitted or `null` otherwise. `NaN` and `Infinity` are rejected. |
+| `streams` | array | yes | Non-empty list of stream objects. Which kinds are required depends on the action — see the stream-kind rules below. |
 | `width` | integer or null | no | Picture width, when the host knows it. Must be `>= 1` when present. |
 | `height` | integer or null | no | Picture height, when the host knows it. Must be `>= 1` when present. |
 | `probe` | object or null | no | How the receipt was measured. Optional, but a present `probe.tool` must be a non-empty string. |
@@ -164,16 +181,27 @@ must be able to decline instead of failing every export for every caller.
 | `duration_sec` | number | no | Stream duration. Must be `> 0` when present. |
 | `bit_rate` | integer | no | Bitrate in bits per second. Must be `>= 0` when present. |
 
-Two cross-field rules do the real work:
+Three cross-field rules do the real work:
 
 - **A deliverable has a picture.** A receipt whose streams are all `audio`,
   `subtitle` or `data` is rejected: an audio-only artifact is not the video the
   caller asked to export.
+- **The picture has to match the action.** `export_thumbnail` renders a still,
+  so it must report an `image` stream and no `video` or `audio` stream —
+  otherwise a host could satisfy a video export with a frame, or a thumbnail
+  with a whole clip. `get_export_status` is deliberately exempt from this rule:
+  it only holds a `job_id` and cannot know in advance whether the job renders
+  a video or a still, so it accepts either picture kind.
 - **Stills have no duration.** `duration_sec` is required exactly when a
   `video` or `audio` stream is present. `export_thumbnail` reports one `image`
   stream and omits it; a still that carries a duration is rejected rather than
   ignored, because it means the host reported the timeline duration instead of
   probing the file.
+
+`size_bytes` and every numeric field must be **finite**: `NaN` and `Infinity`
+are rejected. `json.loads` accepts those literals by default, so a host
+forwarding an `ffprobe` field reported as `N/A` would otherwise walk a
+non-value through every range check.
 
 ### A video receipt
 

@@ -31,21 +31,31 @@ If any of these is unproven, run `capcut-setup` first.
 
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
-| `export_video` | yes | yes | Async. `output_path` plus optional `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`, `verify_output`. Returns `job_id` or `output_path`; only a returned `job_id` makes `get_export_status` and `cancel_export` usable. |
+| `export_video` | yes | yes | Async submit. `output_path` plus optional `timeline_id`, `format` (`mp4`, `mov`), `codec` (`h264`, `h265`, `prores`), size, `fps`, `bitrate_mbps`, `audio`. Returns `job_id` or `output_path`; only a returned `job_id` makes `get_export_status` and `cancel_export` usable. Carries **no** receipt — the file does not exist yet. |
 | `get_export_status` | no | yes | Progress and terminal state for a `job_id`. Add `verify_output: true` to also require a probed output receipt. Completeness is only proved by a reported success **and** an on-disk file. |
 | `cancel_export` | yes | yes | `job_id` of a running job — only usable when the submit call returned one. Idempotent: cancelling twice is safe. Needs `verification.ok: true`; returns no stable ID, so confirm the terminal state with `get_export_status`. |
 | `export_thumbnail` | yes | yes | Still frame at `time`; returns `job_id` or `output_path`. Add `verify_output: true` to also require a probed still-image receipt. |
-| `build_vlog_demo` | yes | no | Async. `media` (list) plus optional `project_name`, `music`, `captions`, `output_path`, `aspect_ratio`, `verify_output`. Not idempotent. Has no required result ID, so pass an explicit `output_path`: a `job_id` is not guaranteed. |
+| `build_vlog_demo` | yes | no | Async submit. `media` (list) plus optional `project_name`, `music`, `captions`, `output_path`, `aspect_ratio`. Not idempotent. Has no required result ID, so pass an explicit `output_path`: a `job_id` is not guaranteed. Carries **no** receipt. |
 
 ### Opt-in export receipt (`verify_output`)
 
 The default export contract only proves a job was accepted. Pass
-`verify_output: true` on `export_video`, `export_thumbnail`,
-`get_export_status`, or `build_vlog_demo` to raise it to a probed receipt:
-the host must return `verification.output` with `path`, `exists: true`,
-`size_bytes`, `duration_sec` (timed media) and a non-empty `streams` list, and
-the call fails closed when it does not. The default stays `false`, so no
-existing caller is held to the stricter contract.
+`verify_output: true` on **`export_thumbnail`** or **`get_export_status`** to
+raise it to a probed receipt: the host must return `verification.output` with
+`path`, `exists: true`, `size_bytes`, `duration_sec` (timed media) and a
+non-empty `streams` list, and the call fails closed when it does not. The
+default stays `false`, so no existing caller is held to the stricter contract.
+
+**The two asynchronous submits do not take the flag.** `export_video` and
+`build_vlog_demo` return a job acknowledgement — the artifact does not exist
+when they return, so demanding a receipt from them would only cost the caller
+the `job_id` it needs to poll. Read a video export out with
+`get_export_status(verify_output: true)` instead.
+
+The receipt is bound to the artifact: when the result carries an
+`output_path`, the receipt's `path` must describe that same file (compared
+case- and separator-insensitively), so a stale probe from an earlier render —
+or the previous item in a batch — cannot stand in for this one.
 
 ```json
 "verification": {
@@ -66,9 +76,11 @@ existing caller is held to the stricter contract.
 }
 ```
 
-`export_thumbnail` reports one `image` stream and leaves `duration_sec` out
-entirely — a still that carries a duration is rejected, not ignored. The full
-field table lives in [export and verification](../references/export-and-verification.md).
+`export_thumbnail` renders a still, so it must report an `image` stream, no
+`video`/`audio` stream, and no `duration_sec`. `get_export_status` accepts
+whichever picture the job produced — it only holds a `job_id` and cannot know
+in advance. The full field table lives in
+[export and verification](../references/export-and-verification.md).
 
 `export_video` and `build_vlog_demo` only acknowledge a job on return: the
 `output_path` they carry back is the requested destination, not proof that a file
@@ -89,8 +101,10 @@ evidence left. See the submit/completion contract in
 | Wrong dimensions or aspect ratio | Canvas, export size, and `aspect_ratio` disagree. | Re-check `get_project_settings` and the export arguments, then re-export. |
 | `build_vlog_demo` produced an empty timeline | Supplied media paths did not resolve on the host. | Import the media first (`capcut-media`) and pass the resulting identifiers. |
 | Submit returned no `job_id` | The host reported only `output_path`, or nothing. There is nothing to poll and nothing to cancel. | Wait for the file to appear at `output_path` and probe it with `ffprobe`. Re-submit with an explicit `output_path` next time. |
-| `CapCut action 'export_video' export receipt must be an object under verification.output` | `verify_output: true` was requested but the host never probed the artifact. | Drop `verify_output` and fall back to an independent `ffprobe`, or fix the host integration per `capcut_panel/HOST_API.md`. |
+| `CapCut action 'get_export_status' export receipt must be an object under verification.output` | `verify_output: true` was requested but the host never probed the artifact. | Drop `verify_output` and fall back to an independent `ffprobe`, or fix the host integration per `capcut_panel/HOST_API.md`. |
 | `... export receipt lacks stream info` / `... has no video or image stream` | The host returned a size but no real stream description. | Same as above: the host must run a probe, not restate the export arguments. |
+| `... export receipt describes X, but export_thumbnail was asked to produce Y` | The receipt describes a different file than the one this call produced — usually a stale probe or the previous item in a batch. | Treat the receipt as void; re-probe the artifact at `Y`. |
+| `CapCut action 'get_export_status' cannot report an export receipt without verification.ok: true` | The host returned a receipt under a readback it did not vouch for. | The host must set `verification.ok: true` alongside `verification.output`. |
 
 ## Acceptance
 
@@ -100,7 +114,7 @@ evidence left. See the submit/completion contract in
 - The artifact is probed independently with `ffprobe` (duration, streams,
   dimensions). ffprobe is an external dependency and is not bundled.
 - Duration and dimensions match the project settings and the export arguments.
-- When `verify_output: true` was passed, `verification.output` also carries `exists: true`, a non-zero `size_bytes`, `duration_sec` for timed media, and a non-empty `streams` list.
+- When `verify_output: true` was passed, `verification.output` also carries `exists: true`, a non-zero `size_bytes`, `duration_sec` for timed media, a non-empty `streams` list, and a `path` matching the `output_path` this call produced.
 - Audio presence matches the requested `audio` flag, and the whole mix is
   checked, not a soloed track.
 - `export_thumbnail` produced an image at the requested time in the requested

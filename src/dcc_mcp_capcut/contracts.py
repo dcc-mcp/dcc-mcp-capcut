@@ -135,9 +135,20 @@ def _validate_requested_receipt(action: str, result: dict[str, Any]) -> None:
 
     ``get_export_status`` reports on a job without mutating anything, so the
     export receipt is the only contract rule that ever applies to it -- and it
-    applies only because the caller asked for it.
+    applies only because the caller asked for it. It still has to carry
+    ``verification.ok: true``, because a receipt under a readback the host did
+    not vouch for is not evidence.
     """
     verification = result.get("verification")
     if not isinstance(verification, dict) or verification.get("ok") is not True:
-        raise RuntimeError(f"CapCut action '{action}' lacks verified post-operation readback")
-    validate_export_receipt(action, verification.get(RECEIPT_KEY))
+        # "post-operation readback" is the right wording for a mutation and the
+        # wrong one for a status poll, so the two get different messages.
+        if action in _MUTATING_ACTIONS:
+            raise RuntimeError(f"CapCut action '{action}' lacks verified post-operation readback")
+        raise RuntimeError(
+            f"CapCut action '{action}' cannot report an export receipt without "
+            "verification.ok: true"
+        )
+    validate_export_receipt(
+        action, verification.get(RECEIPT_KEY), expected_path=result.get("output_path")
+    )

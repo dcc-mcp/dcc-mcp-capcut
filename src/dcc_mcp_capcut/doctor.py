@@ -263,6 +263,25 @@ def check_capcut_executable() -> Check:
     )
 
 
+def check_host_version() -> Check:
+    """Grade the discovered host build against the verified support matrix.
+
+    The matrix is the machine-readable source of truth in ``hosts.versions``.
+    An unlisted -- or unreadable -- build is a ``warn`` with a hint, never a
+    ``fail``: the adapter still binds and starts on it, so refusing to run
+    would overstate what the matrix actually claims.
+    """
+    provider = get_provider()
+    verdict = provider.check_host_version()
+    return Check(
+        "host_version",
+        verdict["status"],
+        verdict["summary"],
+        verdict["detail"],
+        verdict["hint"],
+    )
+
+
 def _dcc_cua_inventory(timeout: float = DCC_CUA_TIMEOUT) -> list[dict[str, Any]]:
     completed = subprocess.run(  # noqa: S603 - project-owned read-only inventory command
         ["dcc-cua", "list"],
@@ -553,6 +572,7 @@ CHECKS: tuple[tuple[str, Callable[[], Check]], ...] = (
     ("dcc_mcp_core", check_core),
     ("runtime_handshake", check_runtime),
     ("capcut_executable", check_capcut_executable),
+    ("host_version", check_host_version),
     ("dcc_cua", check_dcc_cua),
     ("bridge_port", check_bridge_port),
     ("bridge_token", check_bridge_token),

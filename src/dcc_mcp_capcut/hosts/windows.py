@@ -87,6 +87,17 @@ class WindowsHostProvider(HostProvider):
     def flavors(self) -> tuple[WindowsHostFlavor, ...]:
         return WINDOWS_FLAVORS
 
+    def host_version(self) -> str | None:
+        """Windows ships no version the install layout exposes without a PE reader.
+
+        Discovery only resolves an ``.exe`` path. Reading the version resource
+        would need a PE parser the adapter does not depend on, and guessing from
+        the install directory name would invent a fact, so the version stays
+        ``None`` and grades as ``undetermined`` -- an explicit warning with a
+        hint, never a silent pass.
+        """
+        return None
+
     def _candidate_paths(self) -> list[Path]:
         candidates: list[Path] = []
         for flavor in WINDOWS_FLAVORS:
@@ -111,6 +122,7 @@ class WindowsHostProvider(HostProvider):
             "platform": os.name,
             "provider": self.name,
             "supported": True,
+            **self.version_evidence(flavor.name),
         }
 
     def installation_plan(self) -> dict[str, Any]:

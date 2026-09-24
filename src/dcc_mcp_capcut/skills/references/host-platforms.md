@@ -53,6 +53,38 @@ The provider therefore reports:
 - doctor `capcut_executable` → `skip`, with `unsupported` and the reason in its
   detail, because the prerequisite does not apply to this platform.
 
+## Verified host versions
+
+`dcc_mcp_capcut.hosts.versions` is the machine-readable source of truth for
+which host builds the adapter has actually been tested against. It replaces the
+prose acceptance note in `native/qt-probe/README.md`, so `detect_installation()`
+and the doctor can answer "is this build verified?" instead of reporting an
+install as simply "found".
+
+The table is keyed `platform x edition x version`: `SUPPORTED_HOST_VERSIONS`
+holds one `HostVersion` per shipped build, with the Qt runtime it vendors and
+the notes recording how acceptance was reached. `version_support(platform,
+edition, version)` grades a discovered build and returns `status`, `listed`,
+`known_versions`, `verified_builds`, `match` and `hint`.
+
+| `status` | Meaning | Doctor severity |
+| --- | --- | --- |
+| `verified` | listed and acceptance-tested end to end | `ok` |
+| `known` | listed as shipped, not acceptance-tested here | `ok` (with a hint) |
+| `unknown` | discovered, but absent from the matrix | `warn` + hint |
+| `undetermined` | discovered, but the version could not be read | `warn` + hint |
+| `unsupported` | the platform ships no host at all | `skip` |
+
+An unlisted build is a **warning, never a failure**: the adapter binds and
+starts on it, and it is not honest to call that a broken install. The hint names
+the build, the verified builds, and how to get the version added to the matrix.
+Only two states skip — a platform with no host, and a platform where nothing is
+installed yet, because there is then no build to grade.
+
+Currently verified: Windows CapCut `9.4.0.4015` (Qt `6.2.2`). No macOS or
+剪映专业版 build has been acceptance-tested yet, so those rows are empty rather
+than assumed.
+
 ## Consent is unchanged
 
 No provider installs anything. Every plan — WinGet, Homebrew cask, or official

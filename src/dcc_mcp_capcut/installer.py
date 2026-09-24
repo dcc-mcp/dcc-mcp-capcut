@@ -70,6 +70,13 @@ def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
         {
             "bridge_url": bridge_url,
             "bridge_token_configured": bool(configured_token),
+            # The token actually in force, as opposed to the token the operator
+            # set. It is True both when the token is unset and when it is
+            # explicitly the default, because in both cases the bridge speaks
+            # the shared default -- which is a security warning, not a
+            # readiness failure. Doctor reports the narrower
+            # ``uses_default_token``, which is False while unset.
+            "token_is_default": probe_token == DEFAULT_BRIDGE_TOKEN,
             "dcc_pid": pid,
             "dcc_window_handle": window_handle,
             "exact_window_bound": bool(pid and window_handle),
@@ -109,9 +116,15 @@ def verify_installation(*, timeout: float = 2.0) -> dict[str, Any]:
     ) as error:
         evidence["bridge_error"] = f"{type(error).__name__}: {error}"
 
+    # The token is deliberately absent from this gate. ``ready`` answers "can
+    # the adapter bind this host and reach the panel right now", and the bridge
+    # answers that question on whatever token is configured -- including the
+    # documented default. A weak token is a security warning the doctor grades
+    # as `warn` (see ``check_bridge_token``); it is not a wiring fault, so it
+    # must not be able to veto readiness on its own. Both token facts stay in
+    # the evidence above, and ``token_is_default`` is the field to alert on.
     evidence["ready"] = bool(
         evidence["installed"]
-        and evidence["bridge_token_configured"]
         and evidence["exact_window_bound"]
         and evidence["bridge_reachable"]
         and evidence["panel_connected"]

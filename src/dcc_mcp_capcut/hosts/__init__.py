@@ -21,6 +21,16 @@ from .base import HostProvider
 from .flavors import HostFlavor
 from .linux import UNSUPPORTED_REASON, LinuxHostProvider
 from .macos import ACCESSIBILITY_NOTE, MACOS_FLAVORS, MacOSHostProvider
+from .versions import (
+    SUPPORTED_HOST_VERSIONS,
+    VERIFIED_BUILD,
+    HostVersion,
+    find_version,
+    normalize_version,
+    verified_builds,
+    version_support,
+    versions_for,
+)
 from .windows import PACKAGE_ID, WINDOWS_FLAVORS, WINGET_COMMAND, WindowsHostProvider
 
 WINDOWS = "windows"
@@ -85,17 +95,25 @@ __all__ = [
     "MACOS_FLAVORS",
     "PACKAGE_ID",
     "PLATFORMS",
+    "SUPPORTED_HOST_VERSIONS",
     "SUPPORTED_PLATFORMS",
     "UNSUPPORTED_REASON",
     "WINDOWS",
+    "VERIFIED_BUILD",
     "WINDOWS_FLAVORS",
     "WINGET_COMMAND",
     "HostFlavor",
     "HostProvider",
+    "HostVersion",
     "LinuxHostProvider",
     "MacOSHostProvider",
     "WindowsHostProvider",
     "current_platform",
+    "find_version",
     "get_provider",
     "host_flavors",
+    "normalize_version",
+    "verified_builds",
+    "version_support",
+    "versions_for",
 ]

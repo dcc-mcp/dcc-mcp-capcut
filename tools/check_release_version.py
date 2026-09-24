@@ -53,7 +53,9 @@ METADATA_SUFFIX = ".dist-info/METADATA"
 
 # A parsed value that is not a version is a parse that went wrong somewhere,
 # and reporting it as a mismatch would read like a bump request.
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+].*)?$")
+# The suffix has to carry something: `1.2.3-` is what a typo looks like, and no
+# build backend would have produced it.
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+].+)?$")
 PACKAGE_VERSION_RE = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 PROJECT_VERSION_RE = re.compile(r"""^version\s*=\s*["']([^"']+)["']""")
 
@@ -82,6 +84,13 @@ def project_version_without_tomllib(text: str) -> str | None:
     in_project = False
     for raw in text.splitlines():
         line = raw.strip()
+        # A header may carry a trailing comment, so `[project] # release
+        # metadata` is still the header the scan has to recognise. Only a `#`
+        # after the closing bracket can be a comment; one inside the brackets
+        # belongs to a quoted key such as `["a#b"]`.
+        closing = line.find("]") if line.startswith("[") else -1
+        if closing != -1 and "#" in line[closing:]:
+            line = line[: closing + 1]
         if line.startswith("[") and line.endswith("]"):
             in_project = line == "[project]"
             continue

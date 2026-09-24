@@ -206,9 +206,9 @@ against the tree before anything is built, and once against `dist/` before
 anything is uploaded. A file it cannot read a version from is a failure, not a
 skip.
 
-**A green release PR.** A PR opened with the default `GITHUB_TOKEN` triggers no
-workflows, so its runs sit at `action_required` with zero jobs and never turn
-green. `release-please.yml` therefore prefers `secrets.RELEASE_PLEASE_TOKEN` — a
+**A green release PR.** A PR opened with the default `GITHUB_TOKEN` creates its
+`pull_request` runs in an approval-required state, so they sit at
+`action_required` with zero jobs and never turn green on their own. `release-please.yml` therefore prefers `secrets.RELEASE_PLEASE_TOKEN` — a
 PAT makes the release PR an ordinary PR whose checks run on their own — and
 falls back to `GITHUB_TOKEN` until that secret exists. With the fallback in
 place, approve the release PR's runs by hand on the Actions page before

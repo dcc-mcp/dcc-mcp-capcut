@@ -126,6 +126,34 @@ def test_the_tomllib_fallback_finds_nothing_without_a_project_version():
     assert project_version_without_tomllib('[tool.other]\nversion = "9.9.9"\n') is None
 
 
+def test_the_tomllib_fallback_enters_a_header_that_carries_a_comment():
+    # `[project] # release metadata` is valid TOML, and a scan that did not
+    # recognise it would leave the gate outside every table on Python 3.9.
+    text = '[project] # release metadata\nversion = "1.2.3"\n'
+    assert project_version_without_tomllib(text) == VERSION
+
+
+def test_the_tomllib_fallback_keeps_a_hash_inside_a_quoted_header():
+    text = '["a#b"]\nversion = "9.9.9"\n\n[project]\nversion = "1.2.3"\n'
+    assert project_version_without_tomllib(text) == VERSION
+
+
+@pytest.mark.parametrize(
+    ("candidate", "accepted"),
+    [
+        ("0.3.0", True),
+        ("1.2.3+local", True),
+        ("1.2.3-rc1", True),
+        ("1.2.3rc1", False),
+        ("1.2.3-", False),
+        ("1.2", False),
+        ("", False),
+    ],
+)
+def test_only_a_version_a_build_could_have_produced_is_accepted(candidate, accepted):
+    assert bool(check_release_version.VERSION_RE.match(candidate)) is accepted
+
+
 def test_a_pyproject_without_a_project_version_is_a_problem(tmp_path):
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[project]\nname = "dcc-mcp-capcut"\n')

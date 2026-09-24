@@ -148,7 +148,7 @@ def test_every_provider_reports_version_evidence(pin_platform, monkeypatch, plat
 
 
 def test_windows_reports_the_version_as_undetermined(pin_platform, monkeypatch, tmp_path):
-    """Discovery resolves an .exe path only; no version is invented."""
+    """An .exe carrying no version resource degrades; no version is invented."""
     install = tmp_path / "CapCut" / "Apps"
     install.mkdir(parents=True)
     (install / "CapCut.exe").write_bytes(b"")

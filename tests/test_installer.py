@@ -310,6 +310,10 @@ def test_verify_is_json_serialisable_with_the_version_matrix_attached(
     """
     provider = pin_platform("windows")
     monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "s" * 43)
+    # The provider probes the machine it runs on, and a Windows host that has
+    # CapCut installed now reads a real version -- so the probe is pinned to
+    # "nothing read" or this assertion means something different per machine.
+    monkeypatch.setattr("dcc_mcp_capcut.hosts.windows.read_pe_version", lambda _path: None)
     monkeypatch.setattr(
         "dcc_mcp_capcut.installer.detect_installation",
         lambda: {

@@ -4,6 +4,10 @@ CapCut and 剪映专业版 both ship the same two-level launcher layout on Windo
 a per-user ``<app_dir>\\Apps\\<exe>`` install used by current releases, and an
 older machine-wide ``<app_dir>\\<exe>`` install. Discovery and install planning
 are unchanged from the pre-provider implementation; only their packaging moved.
+
+The build installed is the one fact the layout does not expose, so it is read
+from the ``.exe``'s own version resource (:mod:`dcc_mcp_capcut.hosts.pe_version`)
+and graded against the support matrix like the macOS bundle version.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ from typing import Any
 
 from .base import HostProvider
 from .flavors import HostFlavor
+from .pe_version import read_pe_version
 
 PACKAGE_ID = "ByteDance.CapCut"
 WINGET_COMMAND = (
@@ -88,15 +93,17 @@ class WindowsHostProvider(HostProvider):
         return WINDOWS_FLAVORS
 
     def host_version(self) -> str | None:
-        """Windows ships no version the install layout exposes without a PE reader.
+        """The file version stamped in the discovered ``.exe``'s version resource.
 
-        Discovery only resolves an ``.exe`` path. Reading the version resource
-        would need a PE parser the adapter does not depend on, and guessing from
-        the install directory name would invent a fact, so the version stays
-        ``None`` and grades as ``undetermined`` -- an explicit warning with a
-        hint, never a silent pass.
+        Windows publishes no version manifest next to the install, so the
+        ``.exe`` itself is the only source: its ``VS_VERSIONINFO`` stamp is read
+        with :mod:`ctypes` and ``version.dll``, which adds no dependency. A file
+        with no readable version resource -- including every non-Windows lane,
+        where no such API exists -- returns ``None`` and grades ``undetermined``
+        rather than being reported as a build the matrix lists.
         """
-        return None
+        _flavor, executable = self._discover()
+        return read_pe_version(executable) if executable else None
 
     def _candidate_paths(self) -> list[Path]:
         candidates: list[Path] = []
@@ -104,15 +111,25 @@ class WindowsHostProvider(HostProvider):
             candidates.extend(flavor.candidate_paths())
         return candidates
 
-    def detect_installation(self) -> dict[str, Any]:
-        candidates = self._candidate_paths()
-        found: tuple[WindowsHostFlavor, Path] | None = None
+    def _discover(self) -> tuple[WindowsHostFlavor | None, Path | None]:
+        """The first installed edition, as ``(flavor, executable)``.
+
+        Split out of :meth:`detect_installation` so :meth:`host_version` can
+        answer on its own without a second traversal of the install roots.
+        """
         for flavor in WINDOWS_FLAVORS:
             hit = next((path for path in flavor.candidate_paths() if path.is_file()), None)
             if hit is not None:
-                found = (flavor, hit)
-                break
-        flavor, executable = found if found else (DEFAULT_FLAVOR, None)
+                return flavor, hit
+        return None, None
+
+    def detect_installation(self) -> dict[str, Any]:
+        candidates = self._candidate_paths()
+        found, executable = self._discover()
+        flavor = found or DEFAULT_FLAVOR
+        # Discovery already resolved the .exe; read it here and pass the result
+        # down instead of letting ``version_evidence`` probe a second time.
+        version = read_pe_version(executable) if executable else None
         return {
             "installed": executable is not None,
             "executable": str(executable) if executable else None,
@@ -122,7 +139,7 @@ class WindowsHostProvider(HostProvider):
             "platform": os.name,
             "provider": self.name,
             "supported": True,
-            **self.version_evidence(flavor.name),
+            **self.version_evidence(flavor.name, version),
         }
 
     def installation_plan(self) -> dict[str, Any]:

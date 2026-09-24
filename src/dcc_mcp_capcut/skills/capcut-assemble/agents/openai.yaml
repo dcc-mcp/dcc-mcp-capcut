@@ -1,0 +1,15 @@
+# Interface descriptor for CapCut Assembly
+#
+# Consumed by agent UIs that read the `interface` block: a human display name,
+# a one-line summary, and the default prompt to start a session from.
+#
+# This file is deliberately not a second source of truth. The skill name and the
+# capability statement belong to the `SKILL.md` frontmatter, and
+# `tests/test_interface_descriptors.py` fails when this file stops agreeing with
+# it. Keep `short_description` at or under 64 characters and draw its wording
+# from the frontmatter `description`.
+
+interface:
+  display_name: "CapCut Assembly"
+  short_description: "Assemble an edit plan plus a media directory into CapCut."
+  default_prompt: "Assemble the edit plan in the media directory I name into the open CapCut project. Start with dry_run and show me the action script before you dispatch anything."

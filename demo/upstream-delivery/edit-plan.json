@@ -1,0 +1,51 @@
+{
+  "schema": "dcc-mcp-capcut/edit-plan/v1",
+  "name": "Galaxy: we live inside it",
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "duration_frames": 375,
+  "tracks": [
+    {
+      "name": "Picture",
+      "kind": "Video",
+      "clips": [
+        {
+          "name": "earthrise",
+          "media": "assets/earthrise.mp4",
+          "start": 0,
+          "source_in": 0,
+          "duration": 135,
+          "media_duration": 135
+        },
+        {
+          "name": "oahu_flyover",
+          "media": "assets/oahu_flyover.mp4",
+          "start": 135,
+          "source_in": 0,
+          "duration": 240,
+          "media_duration": 240
+        }
+      ]
+    },
+    {
+      "name": "Music",
+      "kind": "Audio",
+      "clips": [
+        {
+          "name": "free_music",
+          "media": "assets/free_ambient.wav",
+          "start": 0,
+          "source_in": 0,
+          "duration": 375,
+          "media_duration": 375,
+          "audio": {"volume": 0.22, "fade_in": 0.8, "fade_out": 1.2}
+        }
+      ]
+    }
+  ],
+  "subtitles": [
+    {"file": "captions/galaxy_zh.srt", "format": "srt", "language": "zh-CN"}
+  ],
+  "output": {"path": "output/galaxy-vlog.mp4", "aspect_ratio": "9:16"}
+}

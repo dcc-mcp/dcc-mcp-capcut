@@ -1,0 +1,15 @@
+# Interface descriptor for CapCut Audio
+#
+# Consumed by agent UIs that read the `interface` block: a human display name,
+# a one-line summary, and the default prompt to start a session from.
+#
+# This file is deliberately not a second source of truth. The skill name and the
+# capability statement belong to the `SKILL.md` frontmatter, and
+# `tests/test_interface_descriptors.py` fails when this file stops agreeing with
+# it. Keep `short_description` at or under 64 characters and draw its wording
+# from the frontmatter `description`.
+
+interface:
+  display_name: "CapCut Audio"
+  short_description: "Add, remove, mix, and fade audio tracks."
+  default_prompt: "Add the audio file I name to the current CapCut timeline, set its level, and apply a fade-in and a fade-out."

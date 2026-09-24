@@ -122,6 +122,7 @@ python -m dcc_mcp_capcut.interchange --input edit.json --output timeline.otio
 
 ## References
 
+- [upstream handoff](../references/upstream-handoff.md)
 - [export and verification](../references/export-and-verification.md)
 - [dependencies and notices](../references/dependencies-and-notices.md)
 - [troubleshooting](../references/troubleshooting.md)

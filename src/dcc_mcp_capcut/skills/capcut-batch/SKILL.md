@@ -168,6 +168,7 @@ re-rendered, because that job may still be out there:
 | `done` | Settles the item from that render. No second export. |
 | `failed` / `cancelled` / `error` | The job is over, so the item is re-rendered. |
 | still running | Refuses to continue, and names the job holding the window. |
+| no `state` at all | The host answered the poll without a verdict, so the job cannot be read to completion. Fails that item only and keeps its `job_id`, so the next resume asks again. |
 | submitted but never named | Refuses that item only, and names the destination. See below. |
 
 That last pair is what matters: two exports to one destination through one
@@ -221,6 +222,7 @@ If the first three are unproven, run `capcut-setup` first.
 | `may already have an export in flight to '...'` | The last run dispatched an export to that path and died before its `job_id` came back. | Nothing was dispatched to it. Check the destination and the CapCut window, then resume with `force_rerender=true`. |
 | `did not reach a terminal state within ...` | One item's export overran its timeout. | The batch stopped: that job is still rendering and holds the bound window. Read it with `get_export_status` or `cancel_export` it, then resume. |
 | `still has export job ... in state 'running'` | A resume found the abandoned job still rendering. | Nothing was dispatched. Read that job with `get_export_status` or `cancel_export` it, then resume again. `force_rerender=true` does not override this — cancel the job first. |
+| `returned no 'state' for job '...'` | The host answered the poll without the one field that says whether the job is over. | A status with no verdict is not evidence that the window is busy, so that item fails and the batch goes on. Fix the host integration; once you have checked the destination is clear, `resume=true, force_rerender=true` renders it. |
 | `output.path ... is already used by item N` | Two variable sets render to one destination. | Give each item a distinct `output_path`, usually by putting a variable in the template's `output_path`. |
 | `manifest_path ... already exists` | A fresh run aimed at an existing batch. | Pass `resume=true` to continue it, or pick a new path. |
 

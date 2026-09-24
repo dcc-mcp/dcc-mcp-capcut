@@ -802,6 +802,7 @@ class FakeHost:
         omit_job_id_for=(),
         no_receipt_for=(),
         stalled_jobs=(),
+        stateless_jobs=(),
         crash_before_export_for=(),
         crash_while_rendering_for=(),
     ):
@@ -809,6 +810,11 @@ class FakeHost:
         self.fail_export_for = set(fail_export_for)
         self.omit_job_id_for = set(omit_job_id_for)
         self.no_receipt_for = set(no_receipt_for)
+        # Jobs the host answers without a state: the poll succeeds and the one
+        # field the poll exists for is missing. Off contract, and every reader
+        # has to agree on what it means -- an unreadable job is not a busy
+        # window, so it must not take the batch down with it.
+        self.stateless_jobs = set(stateless_jobs)
         # Jobs that never finish: the only way to exercise the wait budget. A
         # host that stalls is a real failure mode, and the item must fail with
         # a message that says the job is still running rather than time out the
@@ -866,6 +872,10 @@ class FakeHost:
             self.polls.append(params["job_id"])
             if params["job_id"] in self.crash_while_rendering_for:
                 raise KillProcess(f"killed while {params['job_id']} was rendering")
+            if params["job_id"] in self.stateless_jobs:
+                # A status with no state: progress is reported, the verdict is
+                # not. Nothing here can be read to a terminal state.
+                return {"progress": 0.4}
             if params["job_id"] in self.stalled_jobs:
                 return {"state": "running", "progress": 0.4}
             state = "failed" if params["job_id"] in self.fail_export_for else "done"
@@ -1350,6 +1360,86 @@ def test_a_resume_never_joins_a_job_that_is_still_running(run_skill, media_dir, 
     assert result["success"] is False
     assert "still has export job 'job-2'" in result["message"]
     assert run_skill.host.exports == 2
+
+
+def test_an_orphan_the_host_cannot_describe_fails_only_itself(run_skill, media_dir, tmp_path):
+    """A status with no state is one item's problem, not the resume's.
+
+    The reconciliation that runs before a resume dispatches anything has to
+    agree with every other reader of ``get_export_status``: a status that
+    carries no ``state`` cannot be read to completion, so it is refused like a
+    failed job. It is emphatically *not* a busy window -- an unreadable job is
+    not proof that the host is rendering -- so escalating it out of the loop
+    would abandon every other item in the batch, and at that point the manifest
+    has not been written yet, so even the refusal would go unrecorded.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    # Item 1 overran its wait budget and holds the job the run paid for.
+    assert run_skill.host.exports == 2
+    assert load_batch(str(manifest))["items"][1]["state"] == "failed"
+
+    # The host answers the poll and leaves out the one field that matters.
+    run_skill.host.stalled_jobs = set()
+    run_skill.host.stateless_jobs = {"job-2"}
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    # ok() already asserts the envelope succeeded: the resume carried on
+    # instead of dying on the one unreadable job before rendering anything.
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+    # Item 2, which the first run never reached, was rendered; item 1 was not,
+    # because the job it left behind may still be writing to that destination.
+    assert run_skill.host.exports == 3
+    assert "no 'state'" in context["items"][1]["error"]
+
+    # And the verdict reached the manifest, which is the whole point: the next
+    # resume asks about job-2 again rather than silently starting over.
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["state"] == "failed"
+    assert "no 'state'" in stored["items"][1]["error"]
+    assert stored["items"][1]["job_id"] == "job-2"
+
+
+def test_a_stateless_orphan_still_blocks_a_forced_rerender(run_skill, media_dir, tmp_path):
+    """An unreadable job is not a released destination.
+
+    ``force_rerender`` buys a new render for an item the operator has looked
+    at. It cannot buy one for an item whose job the host will not describe:
+    re-exporting into a destination that may already be being written to is the
+    silent overwrite this whole pass exists to prevent.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+
+    run_skill.host.stalled_jobs = set()
+    run_skill.host.stateless_jobs = {"job-2"}
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True))
+
+    # The forced item stays failed and keeps its job; the batch runs on.
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+    assert "no 'state'" in context["items"][1]["error"]
+    assert load_batch(str(manifest))["items"][1]["job_id"] == "job-2"
+    assert run_skill.host.exports == 3
 
 
 def _killed_run(run_skill, media_dir, manifest, **kwargs):

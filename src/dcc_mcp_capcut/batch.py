@@ -213,6 +213,34 @@ def render_template(
 # ---------------------------------------------------------------------------
 
 
+def _fail_duplicate_destinations(items: list[dict[str, Any]]) -> None:
+    """Fail every item after the first that claims an already-claimed path.
+
+    Two items rendering to one destination do not merely share a filename:
+    the second render overwrites the first, and because the export receipt is
+    bound to the destination the item asked for, *both* receipts still match.
+    The batch would report every item delivered while only the last render
+    exists on disk -- a silent loss, which is the one outcome a batch must not
+    produce.
+
+    Caught here, at build time, so no render is spent discovering it.
+    """
+    owners: dict[str, int] = {}
+    for item in items:
+        path = item["output_path"]
+        if item["state"] == "failed" or not path:
+            continue
+        if path in owners:
+            item["state"] = "failed"
+            item["error"] = (
+                f"output.path {path!r} is already used by item {owners[path]}; every "
+                "batch item needs a distinct destination, or the later render "
+                "silently overwrites the earlier one"
+            )
+        else:
+            owners[path] = item["index"]
+
+
 def _item(index: int, variables: dict[str, Any]) -> dict[str, Any]:
     return {
         "index": index,
@@ -282,6 +310,8 @@ def build_batch(
                 "destination to render to"
             )
         items.append(item)
+
+    _fail_duplicate_destinations(items)
 
     return {
         "schema": BATCH_SCHEMA,

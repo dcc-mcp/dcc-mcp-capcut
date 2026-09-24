@@ -136,6 +136,15 @@ A batch fails one item at a time:
 - A variable set that **does not compile** is failed at build time, before any
   dispatch. The rest of the batch still builds, so you learn about item 31
   before paying for items 1–30.
+- Two items may not render to the **same** `output_path`. The second render
+  would overwrite the first, and because each receipt is bound to the
+  destination its item asked for, both would pass — the batch would report
+  every item delivered while only the last render exists. The collision is
+  failed at build time instead.
+- An export that **overruns** `item_timeout_secs` stops the batch. That job is
+  still rendering host-side and holds the one bound window, so the next item
+  cannot be dispatched into it. Read the job with `get_export_status` or
+  `cancel_export` it, then resume.
 - An item that **fails at dispatch** keeps its error on the item and the batch
   moves on. `continue_on_error=false` stops instead and marks the remainder
   `skipped`.
@@ -175,7 +184,8 @@ If the first three are unproven, run `capcut-setup` first.
 | `export_video acknowledged the job without a job_id` | The host gave nothing to poll. | That item cannot be proven; check the destination file by hand and fix the host integration. |
 | `export job '...' finished in state 'failed'` | The render itself failed. | Fix the cause, then `resume=true` with `retry_failed=true`. |
 | `returned no artifact receipt under verification.output` | The host cannot prove the file exists. | Verify the file yourself, or set `verify_output=false` to accept the host's word and lose per-item proof. |
-| `did not reach a terminal state within ...` | One item's export overran its timeout. | The job is still running host-side; read it with `get_export_status` or `cancel_export` it before resuming. |
+| `did not reach a terminal state within ...` | One item's export overran its timeout. | The batch stopped: that job is still rendering and holds the bound window. Read it with `get_export_status` or `cancel_export` it, then resume. |
+| `output.path ... is already used by item N` | Two variable sets render to one destination. | Give each item a distinct `output_path`, usually by putting a variable in the template's `output_path`. |
 | `manifest_path ... already exists` | A fresh run aimed at an existing batch. | Pass `resume=true` to continue it, or pick a new path. |
 
 ## Acceptance

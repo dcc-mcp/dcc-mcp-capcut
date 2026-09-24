@@ -433,6 +433,35 @@ def test_every_item_carries_its_own_variables_and_output_path():
     assert manifest["items"][1]["name"] == "promo zh 9:16"
 
 
+def test_two_items_may_not_render_to_the_same_destination():
+    """A shared output path is a silent loss, so it is a build failure.
+
+    The second render overwrites the first, and because each receipt is bound
+    to the destination its item asked for, both still match -- the batch would
+    report every item delivered while only the last render exists. Found at
+    build time, before any render is spent.
+    """
+    template = dict(TEMPLATE, output_path="out/promo.mp4")  # no {{lang}}
+
+    manifest = build_batch(template, VARIABLES)
+
+    assert [item["state"] for item in manifest["items"]] == ["pending", "failed", "failed"]
+    assert "already used by item 0" in manifest["items"][1]["error"]
+    assert "overwrites the earlier one" in manifest["items"][2]["error"]
+    # The first item keeps its destination; it is the one that would survive.
+    assert manifest["items"][0]["output_path"] == "out/promo.mp4"
+
+
+def test_a_destination_is_only_checked_when_output_is_required():
+    # Inspecting variants may legitimately render the same path twice; the
+    # collision only matters for a batch that will actually write there.
+    template = dict(TEMPLATE, output_path="out/promo.mp4")
+
+    manifest = build_batch(template, VARIABLES, require_output=False)
+
+    assert manifest["items"][1]["state"] == "failed"
+
+
 def test_building_rejects_a_variables_list_that_is_not_a_list_of_objects():
     with pytest.raises(ValueError, match="nonempty list of objects"):
         build_batch(TEMPLATE, [])
@@ -1197,6 +1226,34 @@ def test_the_batch_stops_waiting_when_an_item_overruns(run_skill, media_dir, tmp
     assert context["items"][0]["state"] == "failed"
     assert "did not reach a terminal state" in context["items"][0]["error"]
     assert "still running host-side" in context["items"][0]["error"]
+
+
+def test_a_timed_out_item_stops_the_batch(run_skill, media_dir, tmp_path):
+    """A render that overran its wait budget is still running.
+
+    There is one bound CapCut window and that item is using it, so the next
+    item cannot be dispatched. The failure is recorded first -- the manifest
+    has to show which job is still out there -- and then the batch stops.
+    """
+    run_skill.host.stalled_jobs = {"job-1"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+
+    context = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(tmp_path / "batch.json"),
+        )
+    )
+
+    assert [item["state"] for item in context["items"]] == ["failed", "skipped", "skipped"]
+    assert "did not reach a terminal state" in context["items"][0]["error"]
+    assert "still rendering" in context["items"][1]["error"]
+    # Only the first item was ever dispatched.
+    assert run_skill.host.exports == 1
+    assert "stopped" in context
 
 
 def test_a_batch_needs_a_template_to_start(run_skill):

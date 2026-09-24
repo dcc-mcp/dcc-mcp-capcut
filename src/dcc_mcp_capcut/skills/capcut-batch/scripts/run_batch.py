@@ -62,6 +62,16 @@ DEFAULT_POLL_INTERVAL_SECS = 5.0
 DEFAULT_ITEM_TIMEOUT_SECS = 600.0
 
 
+class HostStillRunning(RuntimeError):
+    """The host is still rendering this item, so the batch cannot go on.
+
+    Distinct from a failed render on purpose: a render that failed is over and
+    the next item can start, but a render that merely overran its wait budget is
+    still occupying the one bound CapCut window. Starting the next item would
+    dispatch into a host that is mid-render.
+    """
+
+
 def _await_export(
     job_id: str,
     *,
@@ -89,7 +99,10 @@ def _await_export(
                 "cannot be read to completion"
             )
         if clock() >= deadline:
-            raise RuntimeError(
+            # A timeout is not a finished job: the host is still rendering it.
+            # What distinguishes it from a failed render is that the next item
+            # cannot start -- there is one bound window and this job holds it.
+            raise HostStillRunning(
                 f"export job {job_id!r} did not reach a terminal state within "
                 f"{timeout_secs:g}s (last state {state!r}). The job is still running "
                 "host-side: read it with get_export_status, or cancel_export it, "
@@ -204,6 +217,11 @@ def _run_item(
         complete_item(manifest, index, timeline_id=timeline_id, job_id=job_id, receipt=receipt)
     except (RuntimeError, OSError, ValueError) as error:
         fail_item(manifest, index, error)
+        if isinstance(error, HostStillRunning):
+            # Recorded first, then propagated: the manifest has to carry the
+            # job that is still out there, and the caller has to be able to
+            # tell "this batch stopped" from "this batch finished".
+            raise
 
 
 @skill_entry
@@ -278,18 +296,35 @@ def main(
         # Written once before the first item so batch_status can see the batch
         # while item 0 is still rendering, rather than only after it lands.
         save_batch(manifest_path, manifest)
+    stopped: Optional[str] = None
     for position, index in enumerate(indices):
-        _run_item(
-            manifest,
-            index,
-            media_dir=media_dir,
-            strategy=strategy,
-            verify_output=verify_output,
-            poll_interval_secs=poll_interval_secs,
-            item_timeout_secs=item_timeout_secs,
-        )
+        try:
+            _run_item(
+                manifest,
+                index,
+                media_dir=media_dir,
+                strategy=strategy,
+                verify_output=verify_output,
+                poll_interval_secs=poll_interval_secs,
+                item_timeout_secs=item_timeout_secs,
+            )
+        except HostStillRunning as error:
+            # The item is recorded as failed before this propagates, so the
+            # manifest keeps the job that is still running host-side.
+            stopped = str(error)
         if manifest_path:
             save_batch(manifest_path, manifest)
+        if stopped is not None:
+            for skipped in indices[position + 1 :]:
+                skip_item(
+                    manifest,
+                    skipped,
+                    f"batch stopped while item {index} was still rendering: the host "
+                    "is busy and the batch cannot continue",
+                )
+            if manifest_path:
+                save_batch(manifest_path, manifest)
+            break
         if not continue_on_error and manifest["items"][index]["state"] == "failed":
             for skipped in indices[position + 1 :]:
                 skip_item(
@@ -302,6 +337,10 @@ def main(
             break
 
     summary = summarize(manifest)
+    if stopped is not None:
+        # The batch is neither complete nor resumable until an operator deals
+        # with the job still running host-side, so say so once, plainly.
+        summary["stopped"] = stopped
     counts = summary["counts"]
     message = (
         f"Batch delivered {counts['done']} of {summary['total']} item(s); "

@@ -71,9 +71,10 @@ be declared in each:
 
 Rules:
 
-- An undeclared placeholder, a mistyped `{{ name`, or a variable that would
-  inject an object or list into a whole-value field is an error naming the
-  field — never a literal `{{lang}}` in a filename.
+- An undeclared placeholder, a malformed double-brace one such as `{{ name`,
+  or a variable that would inject an object or list into a whole-value field is
+  an error naming the field — never a literal `{{lang}}` in a filename. Single
+  braces are ordinary text: `{lang}` stays `{lang}`.
 - Only strings and numbers interpolate into the middle of a string; a boolean
   or `null` there is an error rather than the text `True` or `None`.
 - Substitution happens **before** compilation, so a variable cannot smuggle in
@@ -107,11 +108,14 @@ Every item's report is on the item, under `reframe`:
 ```json
 {
   "fit": "cover", "source_aspect_ratio": "16:9",
-  "target": {"width": 1080, "height": 1920}, "scale": 120.0, "cropped": true,
-  "visible_source_fraction": {"width": 0.5625, "height": 1.0},
-  "safe_area": 0.5, "safe_area_preserved": true
+  "target": {"width": 1080, "height": 1920}, "scale": 213.333333, "cropped": true,
+  "visible_source_fraction": {"width": 0.316406, "height": 1.0},
+  "safe_area": 0.3, "safe_area_preserved": true
 }
 ```
+
+Read with `safe_area: 0.5`, the same 16:9 → 9:16 cover is refused: only 31.6% of
+the source width survives, and half of it was declared protected.
 
 **The reframe is reported, not applied per clip.** The CapCut bridge exposes no
 clip transform action, so the adapter sets the canvas and export size and tells
@@ -164,7 +168,7 @@ If the first three are unproven, run `capcut-setup` first.
 | --- | --- | --- |
 | `CapCut bridge did not respond; open the bundled panel` | No panel drained an action within 30 s. | Load the panel, confirm `/health` shows `panel_connected: true`, then resume the batch. |
 | `uses undeclared variable 'lang'` | A variable set is missing a placeholder the template uses. | Fix that variable set; `render_batch_template` shows all of them at once. |
-| `has a malformed placeholder` | A typo such as `{{ lang` or `{lang}`. | Fix the template. A mistyped placeholder never renders as literal text. |
+| `has a malformed placeholder` | A malformed double-brace placeholder such as `{{ lang` or `{{}}`. | Fix the template. A mistyped placeholder never renders as literal text; single-brace text such as `{lang}` stays literal, so use `{{lang}}` to substitute. |
 | `fit='cover' requires safe_area` | A cropping reframe with no declared safe area. | Declare `safe_area`, or use `fit='contain'` and take bars. |
 | `would crop into the declared safe area` | The requested crop eats protected picture. | Lower `safe_area`, change the source aspect, or use `contain`. |
 | `output.export size ... does not match the canvas` | An encode size of another aspect. | Reframe under `output.reframe`, where the safe area is checked. |

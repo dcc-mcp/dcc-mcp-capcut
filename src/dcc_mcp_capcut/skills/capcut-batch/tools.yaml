@@ -33,7 +33,11 @@ tools:
     input_schema:
       type: object
       additionalProperties: false
-      required: [template, variables, media_dir]
+      # No required list on purpose: which arguments a call needs depends on
+      # the mode -- template plus variables for a fresh run, manifest_path for
+      # resume, media_dir unless dry_run. run_batch enforces that and reports
+      # which one is missing; a static required list would reject the
+      # documented resume call before it ever ran.
       properties:
         template:
           type: object

@@ -997,9 +997,19 @@ def test_a_subtitle_file_must_still_be_a_portable_relative_path(plan):
             normalize_plan(broken)
 
 
-def test_an_empty_subtitles_list_is_rejected(plan):
-    with pytest.raises(ValueError, match="subtitles must not be empty"):
-        normalize_plan({**plan, "subtitles": []})
+def test_an_empty_subtitles_list_means_no_subtitles(plan):
+    """An empty list normalises to "no subtitle entries", and must.
+
+    ``normalize_plan`` emits ``subtitles: []`` for a plan that carries none, so
+    rejecting that list on input made a compiled plan fail the next validation
+    it met: ``plan_to_actions(compile_plan(document))`` raised for every plan
+    without subtitles. The two readings of an empty list are indistinguishable,
+    and agreeing with the output is the only self-consistent choice.
+    """
+    assert normalize_plan({**plan, "subtitles": []})["subtitles"] == []
+    assert normalize_plan(plan)["subtitles"] == []
+    # The round trip that used to fail.
+    assert plan_to_actions(normalize_plan(plan))["actions"]
 
 
 def test_a_non_list_subtitles_value_is_rejected(plan):

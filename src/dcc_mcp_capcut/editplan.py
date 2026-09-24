@@ -38,6 +38,11 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
+# ``delivery`` holds the rules for what a plan says about its own delivery
+# (canvas aspect, reframing, encode preset). It imports nothing from here, so
+# the two links that act on those rules -- ``plan_to_actions`` below and batch
+# delivery -- cannot end up with two verdicts for one document.
+from .delivery import resolve_export, validate_export_preset
 from .subtitles import ALIGNMENTS, Cue
 from .subtitles import TIMECODE as ALIGN_TIMECODE
 
@@ -356,6 +361,14 @@ def _normalized_subtitles(plan: dict[str, Any]) -> list[dict[str, Any]]:
     The canonical document carries only ``subtitles``, so there is exactly one
     shape for consumers to read -- the property Stage 2 unified the plan for in
     the first place.
+
+    An empty list is accepted and means "no subtitle entries". It has to be:
+    this function's own output is ``subtitles: []`` for a plan with none, so
+    rejecting the empty list made a compiled plan fail the next validation it
+    met -- ``plan_to_actions(compile_plan(document))`` raised for every plan
+    without subtitles, which is most of them. There is no way to tell an
+    author's empty list from a normalised one, and the lenient reading costs
+    nothing: an empty list already means what an absent field means.
     """
     single = plan.get("subtitle")
     many = plan.get("subtitles")
@@ -367,8 +380,6 @@ def _normalized_subtitles(plan: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     if not isinstance(many, list):
         raise ValueError("subtitles must be a list")
-    if not many:
-        raise ValueError("subtitles must not be empty; omit the field instead")
     return [_validate_subtitle(spec, index) for index, spec in enumerate(many)]
 
 
@@ -491,6 +502,16 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
         for key in ("reframe", "export"):
             if key in normalized["output"] and not isinstance(normalized["output"][key], dict):
                 raise ValueError(f"output {key} must be an object")
+        # One verdict, here, at compile time: a preset that no link can deliver
+        # is rejected when the plan is compiled rather than when some later
+        # link happens to ask for the encode settings. A plan carrying no
+        # preset is not checked -- the canvas is the default, and there is
+        # nothing to contradict.
+        if "export" in normalized["output"]:
+            validate_export_preset(
+                normalized["output"]["export"],
+                (normalized["width"], normalized["height"]),
+            )
         if not normalized["output"]:
             raise ValueError("output must not be empty")
 
@@ -974,22 +995,15 @@ def plan_to_actions(
         output = normalized.get("output") or {}
         if not output.get("path"):
             raise ValueError("export=True requires output.path on the plan")
-        # The declared encode preset, when the plan carries one; the canvas is
-        # the default so a plan without a preset still exports what it framed.
-        preset = output.get("export") or {}
+        # Resolved through the same function batch uses, so a preset that is
+        # refused for one item is never dispatched as a distorted encode by
+        # another link. The canvas is the default for every unset setting, so a
+        # plan with no preset still exports exactly what it framed.
         params = {
             "timeline_id": TIMELINE_PLACEHOLDER,
             "output_path": output["path"],
-            "width": preset.get("width", normalized["width"]),
-            "height": preset.get("height", normalized["height"]),
-            "fps": preset.get("fps", fps),
+            **resolve_export(normalized),
         }
-        # Only the keys the host schema names, and only when declared: an
-        # absent setting must stay the host's default rather than becoming an
-        # adapter-invented one.
-        for key in ("format", "codec", "bitrate_mbps", "audio"):
-            if preset.get(key) is not None:
-                params[key] = preset[key]
         actions.append({"action": "export_video", "params": params})
 
     actions.append({"action": "save_project", "params": {}})

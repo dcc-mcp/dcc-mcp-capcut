@@ -32,6 +32,7 @@ from dcc_mcp_capcut.batch import (
     build_batch,
     complete_item,
     fail_item,
+    fresh_overwrite_check,
     item_counts,
     load_batch,
     render_template,
@@ -41,6 +42,7 @@ from dcc_mcp_capcut.batch import (
     substitute_variables,
     summarize,
 )
+from dcc_mcp_capcut.editplan import compile_plan, plan_to_actions
 
 ROOT = Path(__file__).parents[1]
 SCRIPTS = ROOT / "src" / "dcc_mcp_capcut" / "skills" / "capcut-batch" / "scripts"
@@ -376,6 +378,25 @@ def test_the_preset_reaches_the_action_script():
 # ---------------------------------------------------------------------------
 
 
+def test_a_template_without_subtitles_still_renders():
+    """Regression: a batch of plans that carry no subtitles.
+
+    A compiled plan carries ``subtitles: []``, and that empty list used to be
+    rejected by the next validation it met, so ``plan_to_actions`` raised for
+    every plan with no subtitle file -- which is most batches. Rendering a
+    template walks exactly that path.
+    """
+    template = dict(TEMPLATE)
+    template.pop("subtitle_files")
+
+    manifest = build_batch(
+        template, [{"lang": "en", "aspect": "9:16", "length": 4}], require_output=False
+    )
+
+    assert manifest["items"][0]["state"] == "pending"
+    assert manifest["items"][0]["plan"]["subtitles"] == []
+
+
 def test_one_bad_variable_set_does_not_take_the_batch_with_it():
     variables = VARIABLES + [{"lang": "fr", "aspect": "9:16"}]  # no 'length'
 
@@ -419,6 +440,57 @@ def test_building_rejects_a_variables_list_that_is_not_a_list_of_objects():
         build_batch(TEMPLATE, ["en"])
 
 
+def test_a_preset_of_another_aspect_is_refused_by_the_assembly_link_too():
+    """Both links must give the same verdict for one document.
+
+    ``apply_edit_plan(export=True)`` lowers a plan to an ``export_video``
+    action, so a preset the batch link refuses must not be dispatched as a
+    distorted encode by the assembly link. The rules have one owner.
+    """
+    from dcc_mcp_capcut.delivery import EXPORT_CODECS, EXPORT_FORMATS
+
+    canvas = {
+        "schema": "dcc-mcp-capcut/edit-plan/v1",
+        "name": "x",
+        "fps": 30,
+        "width": 1080,
+        "height": 1920,
+        "tracks": [
+            {
+                "name": "V",
+                "kind": "Video",
+                "clips": [{"name": "c", "media": "a.mp4", "start": 0, "duration": 30}],
+            }
+        ],
+        "output": {"path": "o.mp4"},
+    }
+
+    # A compile-time verdict, not one that only appears when a link asks.
+    with pytest.raises(ValueError, match="does not match the canvas"):
+        compile_plan(
+            dict(canvas, output={"path": "o.mp4", "export": {"width": 640, "height": 480}})
+        )
+    with pytest.raises(ValueError, match="must be declared together"):
+        compile_plan(dict(canvas, output={"path": "o.mp4", "export": {"width": 640}}))
+    with pytest.raises(ValueError, match="codec must be one of"):
+        compile_plan(dict(canvas, output={"path": "o.mp4", "export": {"codec": "vp9"}}))
+
+    # A valid preset is lowered with the canvas filling in what it omits.
+    plan = compile_plan(dict(canvas, output={"path": "o.mp4", "export": {"codec": "h265"}}))
+    step = [
+        s for s in plan_to_actions(plan, export=True)["actions"] if s["action"] == "export_video"
+    ]
+    assert step[0]["params"] == {
+        "timeline_id": "$timeline",
+        "output_path": "o.mp4",
+        "width": 1080,
+        "height": 1920,
+        "fps": 30.0,
+        "codec": "h265",
+    }
+    assert EXPORT_FORMATS and EXPORT_CODECS
+
+
 # ---------------------------------------------------------------------------
 # Manifest: the resume record
 # ---------------------------------------------------------------------------
@@ -432,6 +504,21 @@ def test_a_manifest_survives_a_round_trip(tmp_path):
     restored = load_batch(str(path))
 
     assert restored == manifest
+
+
+def test_an_existing_file_is_never_replaced_by_a_fresh_run(tmp_path):
+    """The overwrite guard tests existence, not parseability.
+
+    A truncated manifest or an unrelated file at the path is still a file the
+    caller did not ask to have replaced: inferring "absent" from a parse
+    failure would let a fresh batch silently destroy the record of renders
+    already paid for.
+    """
+    path = tmp_path / "batch.json"
+    path.write_text("{not json at all", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="already exists"):
+        fresh_overwrite_check(str(path))
 
 
 def test_a_corrupt_manifest_is_refused_rather_than_repaired(tmp_path):
@@ -951,6 +1038,87 @@ def test_resume_does_not_need_the_template_again(run_skill, media_dir, tmp_path)
 
     assert context["counts"]["done"] == 1
     assert run_skill.host.exports == 1  # nothing was re-rendered
+
+
+def test_a_retry_after_a_late_failure_keeps_the_subtitle_alignment(run_skill, media_dir, tmp_path):
+    """Dispatching must not mutate the stored plan.
+
+    Stripping the adapter-side ``align``/``output_path`` directives is part of
+    lowering. The manifest is saved after every item, so mutating the stored
+    plan means a retry following a late failure imports the un-timed file
+    instead of the re-timed one -- and reports success.
+    """
+    import copy as copy_module
+
+    template = dict(TEMPLATE)
+    template["subtitle_files"] = [
+        {"file": "subs/{{lang}}.srt", "align": "sequence", "output_path": "subs/aligned.srt"}
+    ]
+    manifest = tmp_path / "batch.json"
+    item = build_batch(template, [{"lang": "en", "aspect": "16:9", "length": 4}])["items"][0]
+    assert item["state"] != "failed", item["error"]
+    authored = copy_module.deepcopy(item["plan"])
+
+    # Fail the item after assembly, the way a real render failure would.
+    run_skill.host.fail_export_for = {"job-1"}
+    ok(
+        run_skill.main(
+            template=template,
+            variables=[{"lang": "en", "aspect": "16:9", "length": 4}],
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+
+    stored = load_batch(str(manifest))["items"][0]["plan"]
+    assert stored == authored, "the persisted plan lost the directives a retry needs"
+    assert stored["subtitles"][0]["align"] == "sequence"
+
+
+def test_a_build_failure_keeps_its_compile_reason_when_retried(run_skill, media_dir, tmp_path):
+    # begin_item clears the previous error, so the compile verdict has to be
+    # read before the item is marked running -- otherwise a resume replaces
+    # "undeclared variable 'length'" with a contentless "did not compile".
+    variables = [{"lang": "en", "aspect": "16:9"}]  # no 'length'
+
+    context = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=variables,
+            media_dir=str(media_dir),
+            manifest_path=str(tmp_path / "batch.json"),
+        )
+    )
+
+    assert "undeclared variable 'length'" in context["items"][0]["error"]
+
+
+def test_the_manifest_is_observable_before_the_first_item_finishes(run_skill, media_dir, tmp_path):
+    # batch_status is the only way to watch a batch while it renders, which
+    # means the manifest has to exist during item 0, not only after it.
+    manifest = tmp_path / "batch.json"
+    seen: list[bool] = []
+    run_skill.host.stalled_jobs = {"job-1"}
+
+    def no_sleep(_seconds):
+        seen.append(manifest.exists())
+
+    run_skill._SLEEP = no_sleep
+    # Advanced in small steps so the item actually polls more than once: the
+    # manifest has to be on disk during the wait, not only after it ends.
+    ticks = iter(range(0, 100_000, 100))
+    run_skill._CLOCK = lambda: next(ticks)
+
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES[:1],
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+
+    assert seen and all(seen), "the manifest was absent while the first item ran"
 
 
 def test_resume_without_a_manifest_path_is_refused(run_skill):

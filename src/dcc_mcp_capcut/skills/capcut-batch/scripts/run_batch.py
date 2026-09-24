@@ -25,6 +25,7 @@ unattended path in this adapter today, and this tool does not pretend otherwise.
 
 from __future__ import annotations
 
+import copy
 import time
 from typing import Any, Callable, Optional
 
@@ -38,6 +39,7 @@ from dcc_mcp_capcut.batch import (
     build_batch,
     complete_item,
     fail_item,
+    fresh_overwrite_check,
     load_batch,
     save_batch,
     select_items,
@@ -138,15 +140,25 @@ def _run_item(
     item_timeout_secs: float,
 ) -> None:
     """Assemble, export and settle one item, recording whatever happens."""
+    # Read the build verdict before the item is marked running: begin_item
+    # clears ``error`` so a retry starts from a clean slate, and that clear
+    # would otherwise erase the only record of why the item never compiled.
+    build_error = manifest["items"][index].get("error")
     item = begin_item(manifest, index)
     try:
         plan = item["plan"]
         if plan is None:
             # A build failure is not dispatchable, and retrying it can only
-            # fail the same way. The error from the build is already on the
-            # item; keep it rather than replacing it with a dispatch error.
-            raise RuntimeError(item["error"] or "this item did not compile")
+            # fail the same way. Keep the compile reason rather than replacing
+            # it with a dispatch error.
+            raise RuntimeError(build_error or "this item did not compile")
 
+        # Dispatch a copy. Stripping the adapter-side subtitle directives is
+        # part of lowering, not a change to the plan, and the manifest is saved
+        # after every item -- mutating the stored plan would mean a retry after
+        # a late failure silently drops the requested alignment and imports the
+        # un-timed file instead.
+        plan = copy.deepcopy(plan)
         script = plan_to_actions(plan, media_dir=media_dir)
         # Same ordering as the single-shot path: alignment is resolved before
         # the strategy is chosen so the host batch action never receives an
@@ -259,21 +271,13 @@ def main(
         )
 
     if manifest_path and not resume:
-        # Refusing to overwrite is what makes the resume record trustworthy: a
-        # second run that silently replaced the manifest would lose every item
-        # the first one already paid for.
-        try:
-            load_batch(manifest_path)
-        except ValueError as error:
-            if "cannot read batch manifest" not in str(error):
-                raise
-        else:
-            raise ValueError(
-                f"manifest_path {manifest_path!r} already exists; pass resume=true to "
-                "continue that batch, or choose a new path to start a fresh one"
-            )
+        fresh_overwrite_check(manifest_path)
 
     indices = select_items(manifest, retry_failed=retry_failed or resume)
+    if manifest_path:
+        # Written once before the first item so batch_status can see the batch
+        # while item 0 is still rendering, rather than only after it lands.
+        save_batch(manifest_path, manifest)
     for position, index in enumerate(indices):
         _run_item(
             manifest,

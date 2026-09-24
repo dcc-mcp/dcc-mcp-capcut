@@ -29,9 +29,10 @@ A template is an ordinary plan document, so every rule in
 
 Rules, all fail-closed:
 
-- An undeclared variable, and a malformed one (`{{ lang`, `{{}}`), are errors
-  naming the field. A placeholder never survives into the rendered plan as
-  literal text — a typo would otherwise silently import the wrong file.
+- An undeclared variable, and a malformed double-brace one (`{{ lang`, `{{}}`),
+  are errors naming the field. A placeholder never survives into the rendered
+  plan as literal text — a typo would otherwise silently import the wrong file.
+  Single braces are ordinary text: `{lang}` stays `{lang}`.`
 - Only strings and numbers interpolate into a longer string. A boolean or
   `null` there would become the text `True` or `None`, which is never intended.
 - A whole-value placeholder takes a scalar only. A variable that injects an

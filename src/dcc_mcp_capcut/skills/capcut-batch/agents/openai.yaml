@@ -1,0 +1,15 @@
+# Interface descriptor for CapCut Batch
+#
+# Consumed by agent UIs that read the `interface` block: a human display name,
+# a one-line summary, and the default prompt to start a session from.
+#
+# This file is deliberately not a second source of truth. The skill name and the
+# capability statement belong to the `SKILL.md` frontmatter, and
+# `tests/test_interface_descriptors.py` fails when this file stops agreeing with
+# it. Keep `short_description` at or under 64 characters and draw its wording
+# from the frontmatter `description`.
+
+interface:
+  display_name: "CapCut Batch"
+  short_description: "Turn one template plus N variable sets into N deliverables"
+  default_prompt: "Render the template at the manifest path I give you with the variable sets it names, and report the receipt for each deliverable as it finishes."

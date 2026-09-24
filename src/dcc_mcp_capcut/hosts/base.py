@@ -15,6 +15,11 @@ from typing import Any
 from .flavors import HostFlavor
 from .versions import DOCTOR_STATUS, UNDETERMINED, UNKNOWN, VERIFIED, version_support
 
+#: Sentinel for "the caller did not read a version", kept distinct from an
+#: explicitly read ``None``. Without it a provider whose discovery read the
+#: plist and found no version would probe the filesystem a second time.
+_UNREAD: Any = object()
+
 #: One-line summaries for each support-matrix verdict, filled with the edition,
 #: the version and the platform label.
 _VERSION_SUMMARY = {
@@ -95,10 +100,10 @@ class HostProvider(ABC):
 
         Providers merge this into their detection payload so the support-matrix
         verdict travels with the rest of the evidence instead of living only in
-        the doctor. Pass ``version`` when discovery already read it, so the
-        version is not probed a second time.
+        the doctor. Pass ``version`` when discovery already read it -- including
+        an explicit ``None`` -- so the version is not probed a second time.
         """
-        resolved = version if version is not None else self.host_version()
+        resolved = self.host_version() if version is _UNREAD else version
         support = version_support(self.name, edition, resolved, platform_supported=self.supported)
         return {"host_version": resolved, "version_support": support}
 

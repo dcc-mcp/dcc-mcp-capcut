@@ -301,9 +301,16 @@ def test_check_survives_a_provider_that_reports_no_version_evidence(pin_platform
     assert check.detail["edition"] == "capcut"
 
 
-def test_macos_bundle_roots_stay_configurable(pin_platform, macos_applications, monkeypatch):
-    """Guard against a refactor that reintroduces a second plist read."""
-    macos_applications("CapCut.app", version="6.9.0")
+@pytest.mark.parametrize("version", ["6.9.0", None])
+def test_macos_reads_the_bundle_plist_exactly_once(
+    pin_platform, macos_applications, monkeypatch, version
+):
+    """Discovery must not re-probe the plist, whatever the plist says.
+
+    A missing ``CFBundleShortVersionString`` is a read that returned nothing,
+    not a read that never happened, so it must not trigger a second discovery.
+    """
+    macos_applications("CapCut.app", version=version)
     provider = pin_platform("macos")
     calls = []
     original = macos_host._read_bundle_metadata

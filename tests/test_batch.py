@@ -1874,3 +1874,60 @@ def test_batch_status_refuses_a_manifest_it_cannot_read(tmp_path):
     assert "cannot read batch manifest" in failed(
         status.main(manifest_path=str(tmp_path / "missing.json"))
     )
+
+
+def test_an_orphan_the_host_later_describes_is_re_rendered(run_skill, media_dir, tmp_path):
+    """The exit the failure-recovery table promises, pinned by a test.
+
+    `SKILL.md` sends an operator here: make the host name a terminal state --
+    read the job again once it is over, or `cancel_export` it -- then resume.
+    That promise hangs on the reconciliation's "the job is over, so re-render"
+    row, which had no regression test: every other orphan outcome did
+    (`done` settles, still running refuses, no `state` fails, no `job_id`
+    fails, no receipt fails). A documented way out that nothing asserts is how
+    the last two rounds of drift started, so this one is asserted.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    # Item 1 overran its wait budget and holds the job the run paid for.
+    assert run_skill.host.exports == 2
+
+    # The host will not describe that job, so the item fails and keeps it.
+    run_skill.host.stalled_jobs = set()
+    run_skill.host.stateless_jobs = {"job-2"}
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+    assert context["items"][1]["state"] == "failed"
+    assert "no 'state'" in context["items"][1]["error"]
+    assert load_batch(str(manifest))["items"][1]["job_id"] == "job-2"
+
+    # The operator's move: read the job again once it is over (or cancel it),
+    # so the host now names a terminal state that is not `done`.
+    before = run_skill.host.exports
+    run_skill.host.stateless_jobs = set()
+    run_skill.host.fail_export_for = {"job-2"}
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    # Re-rendered exactly once, from the reconciliation's "job is over" row --
+    # not settled from the abandoned job, and not refused. The count is the
+    # point: the promise is one render, and an implementation that rendered
+    # twice before succeeding would still end on `done`.
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert context["items"][1]["error"] is None
+    assert context["complete"] is True
+    assert run_skill.host.exports == before + 1
+    # Four in total, not three: the resume above already spent one on item 2,
+    # so this render is job-4 and it is the only new one.
+    assert run_skill.host.exports == 4
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["job_id"] == "job-4"
+    assert stored["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"

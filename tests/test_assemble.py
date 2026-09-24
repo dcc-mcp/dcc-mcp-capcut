@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from dcc_mcp_capcut import assemble as assemble_module
 from dcc_mcp_capcut.editplan import PLAN_SCHEMA, compile_plan
 
 ROOT = Path(__file__).parents[1]
@@ -44,7 +45,13 @@ def load_skill():
 
 @pytest.fixture
 def skill(monkeypatch):
-    """The skill script with ``call_bridge`` routed at a recording fake."""
+    """The skill script with the shared dispatch routed at a recording fake.
+
+    The fake is installed on ``dcc_mcp_capcut.assemble``, where the composed
+    walk and the host call now live: batch delivery reuses the same module, so
+    patching the skill script's own namespace would leave the real bridge in
+    the path.
+    """
     module = load_skill()
     calls: list[tuple[str, dict]] = []
     behaviour: dict[str, object] = {}
@@ -56,7 +63,7 @@ def skill(monkeypatch):
             raise AssertionError("no host behaviour configured")
         return handler(action, params)
 
-    monkeypatch.setattr(module, "call_bridge", fake_call_bridge)
+    monkeypatch.setattr(assemble_module, "call_bridge", fake_call_bridge)
     module.calls = calls
     module.respond = lambda handler: behaviour.__setitem__("handle", handler)
     return module
@@ -463,7 +470,7 @@ def test_a_walk_that_proves_nothing_is_a_failure(skill):
     skill.respond(handle)
 
     with pytest.raises(RuntimeError, match="no step returned a timeline readback"):
-        skill._run_composed(script)
+        assemble_module.run_composed_script(script)
 
 
 # ---------------------------------------------------------------------------

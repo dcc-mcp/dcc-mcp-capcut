@@ -134,8 +134,22 @@ def _normalize_path(value: str) -> str:
     ``abspath`` is intentionally not used: it resolves a relative path against
     the *adapter's* working directory, which is not the host's, so it invents a
     prefix neither side meant. ``normpath`` folds ``.`` and ``..`` without one.
+
+    Also used outside this module, through :data:`normalize_path`, because the
+    same folding has to be applied everywhere two paths are compared for
+    identity. Batch delivery refuses two items rendering to one destination,
+    and the check that catches ``out/./a.mp4`` against ``out//a.mp4`` has to
+    agree with this one, or a collision the receipt bind considers identical
+    slips through the guard meant to stop it.
     """
     return posixpath.normpath(value.replace("\\", "/")).lower()
+
+
+#: The public name for :func:`_normalize_path`. The folding is private in
+#: spirit -- this module owns what two paths being "the same file" means -- but
+#: a caller that has to reach the same verdict has to reach it through the same
+#: function, not a re-typed copy of it.
+normalize_path = _normalize_path
 
 
 def receipt_requested(params: Any) -> bool:

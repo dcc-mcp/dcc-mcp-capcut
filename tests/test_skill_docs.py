@@ -56,6 +56,7 @@ def test_every_skill_directory_was_discovered():
         "capcut-asr",
         "capcut-assemble",
         "capcut-audio",
+        "capcut-batch",
         "capcut-effects",
         "capcut-export",
         "capcut-interchange",

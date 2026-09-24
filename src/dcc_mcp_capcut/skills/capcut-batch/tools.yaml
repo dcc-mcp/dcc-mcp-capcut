@@ -1,0 +1,122 @@
+tools:
+  - name: render_batch_template
+    description: "Render a plan template against N variable sets and return every compiled plan, reframe report and encode preset. Host-free; dispatches nothing and writes nothing."
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [template, variables]
+      properties:
+        template:
+          type: object
+          description: "A canonical plan (carries 'tracks') or a vlog recipe (carries 'media') with {{placeholder}} fields."
+        variables:
+          type: array
+          minItems: 1
+          description: "One object per batch item. Every placeholder the template uses must be declared in each one."
+          items: {type: object}
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          default: 30
+          description: "Frame rate used when compiling a seconds-based recipe."
+        media_index:
+          type: object
+          description: "Maps recipe asset ids to portable relative paths, for entries such as a music bed that carry an id instead of a path."
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/render_batch_template.py
+  - name: run_batch
+    description: "Render one template against N variable sets, one verified item at a time, with failure isolation and a resumable manifest. Sequential and host-bound: it needs the visible CapCut window for the whole run."
+    input_schema:
+      type: object
+      additionalProperties: false
+      # No required list on purpose: which arguments a call needs depends on
+      # the mode -- template plus variables for a fresh run, manifest_path for
+      # resume, media_dir unless dry_run. run_batch enforces that and reports
+      # which one is missing; a static required list would reject the
+      # documented resume call before it ever ran.
+      properties:
+        template:
+          type: object
+          description: "A canonical plan or vlog recipe carrying {{placeholder}} fields."
+        variables:
+          type: array
+          minItems: 1
+          description: "One object per batch item; every placeholder must be declared in each one."
+          items: {type: object}
+        media_dir:
+          type: string
+          minLength: 1
+          description: "Delivery root holding every file the rendered plans reference. Required unless dry_run is true."
+        manifest_path:
+          type: string
+          minLength: 1
+          description: "Where the batch state is written after every item. Required for resume, and never overwritten by a fresh run."
+        resume:
+          type: boolean
+          default: false
+          description: "Continue the batch already recorded at manifest_path instead of building a new one."
+        retry_failed:
+          type: boolean
+          default: false
+          description: "Re-attempt items that failed. Implied by resume; delivered items are never re-rendered."
+        continue_on_error:
+          type: boolean
+          default: true
+          description: "Keep going after a failed item. When false, the batch stops and the remaining items are marked skipped."
+        verify_output:
+          type: boolean
+          default: true
+          description: "Ask the host for the artifact receipt on every delivered item and fail the item when it is absent."
+        dry_run:
+          type: boolean
+          default: false
+          description: "Compile every item and dispatch nothing. Writes no manifest."
+        fps:
+          type: number
+          exclusiveMinimum: 0
+          default: 30
+        media_index:
+          type: object
+        strategy:
+          type: string
+          enum: [auto, host, composed]
+          default: auto
+          description: "Assembly dispatch strategy, the same choice apply_edit_plan offers."
+        poll_interval_secs:
+          type: number
+          minimum: 0
+          default: 5
+          description: "Gap between get_export_status polls for one item."
+        item_timeout_secs:
+          type: number
+          exclusiveMinimum: 0
+          default: 600
+          description: "How long one item's export may stay non-terminal before the item fails."
+    read_only: false
+    destructive: true
+    idempotent: true
+    execution: async
+    affinity: any
+    timeout_hint_secs: 3600
+    source_file: scripts/run_batch.py
+  - name: batch_status
+    description: "Read a batch manifest back: per-item state, output path, receipt and failure reason. Host-free; re-probes no artifact."
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [manifest_path]
+      properties:
+        manifest_path:
+          type: string
+          minLength: 1
+          description: "Path to the manifest written by run_batch."
+    read_only: true
+    destructive: false
+    idempotent: true
+    execution: sync
+    affinity: any
+    source_file: scripts/batch_status.py

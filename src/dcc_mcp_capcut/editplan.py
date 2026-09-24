@@ -227,7 +227,12 @@ _TRACK_FIELDS = {"name", "kind", "clips"}
 _CLIP_FIELDS = {"name", "media", "start", "source_in", "duration", "media_duration", "audio"}
 _AUDIO_FIELDS = {"volume", "fade_in", "fade_out"}
 _CAPTION_FIELDS = {"text", "start", "duration", "style"}
-_OUTPUT_FIELDS = {"path", "aspect_ratio"}
+# ``reframe`` and ``export`` are batch-delivery directives: they say how the
+# delivered canvas relates to the authored framing, and which encode settings
+# the render should use. Both are optional and both are only consumed by the
+# assembly and batch links -- ``plan_to_edl`` drops them, as it drops every
+# other presentation field OTIO cannot represent.
+_OUTPUT_FIELDS = {"path", "aspect_ratio", "reframe", "export"}
 
 
 def _validate_clip(spec: Any, track_name: str, index: int) -> dict:
@@ -469,6 +474,8 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             for key, value in (
                 ("path", output.get("path")),
                 ("aspect_ratio", output.get("aspect_ratio")),
+                ("reframe", output.get("reframe")),
+                ("export", output.get("export")),
             )
             if value is not None
         }
@@ -476,8 +483,16 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             require_text(normalized["output"]["path"], "output path")
         if "aspect_ratio" in normalized["output"]:
             require_text(normalized["output"]["aspect_ratio"], "output aspect_ratio")
+        # The two directives are passed through as objects, not interpreted
+        # here: the canvas arithmetic and the encode vocabulary are owned by
+        # ``batch``, and a plan carries them so one document still means one
+        # thing to every consumer. Rejecting a non-object early is what keeps
+        # them from arriving at that module as something it cannot read.
+        for key in ("reframe", "export"):
+            if key in normalized["output"] and not isinstance(normalized["output"][key], dict):
+                raise ValueError(f"output {key} must be an object")
         if not normalized["output"]:
-            raise ValueError("output requires at least one of: path, aspect_ratio")
+            raise ValueError("output must not be empty")
 
     return normalized
 
@@ -496,6 +511,8 @@ _RECIPE_FIELDS = {
     "subtitle_files",
     "captions",
     "output_path",
+    "reframe",
+    "export",
 }
 _RECIPE_MEDIA_FIELDS = {"id", "path", "start", "duration", "track_type", "source_in"}
 _RECIPE_MUSIC_FIELDS = {"media_id", "path", "start", "duration", "volume", "fade_in", "fade_out"}
@@ -675,6 +692,12 @@ def compile_recipe(
         plan["output"] = {"aspect_ratio": aspect_ratio}
         if output_path is not None:
             plan["output"]["path"] = require_text(output_path, "output_path")
+    # Forwarded untouched, for the batch link: a recipe is an input alias for a
+    # canonical plan, so it has to be able to express everything the plan can,
+    # including how a 9:16 delivery reframes a 16:9 authoring.
+    for key in ("reframe", "export"):
+        if recipe.get(key) is not None:
+            plan.setdefault("output", {})[key] = recipe[key]
 
     return normalize_plan(plan)
 
@@ -951,18 +974,23 @@ def plan_to_actions(
         output = normalized.get("output") or {}
         if not output.get("path"):
             raise ValueError("export=True requires output.path on the plan")
-        actions.append(
-            {
-                "action": "export_video",
-                "params": {
-                    "timeline_id": TIMELINE_PLACEHOLDER,
-                    "output_path": output["path"],
-                    "width": normalized["width"],
-                    "height": normalized["height"],
-                    "fps": fps,
-                },
-            }
-        )
+        # The declared encode preset, when the plan carries one; the canvas is
+        # the default so a plan without a preset still exports what it framed.
+        preset = output.get("export") or {}
+        params = {
+            "timeline_id": TIMELINE_PLACEHOLDER,
+            "output_path": output["path"],
+            "width": preset.get("width", normalized["width"]),
+            "height": preset.get("height", normalized["height"]),
+            "fps": preset.get("fps", fps),
+        }
+        # Only the keys the host schema names, and only when declared: an
+        # absent setting must stay the host's default rather than becoming an
+        # adapter-invented one.
+        for key in ("format", "codec", "bitrate_mbps", "audio"):
+            if preset.get(key) is not None:
+                params[key] = preset[key]
+        actions.append({"action": "export_video", "params": params})
 
     actions.append({"action": "save_project", "params": {}})
     return {

@@ -14,7 +14,7 @@ lands at the checkout root can find the real content. It is not the authoritativ
 description of any CapCut capability.
 
 - **Authoritative content lives inside the package**, in
-  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 13 files ship in the
+  `src/dcc_mcp_capcut/skills/capcut-*/SKILL.md`. Those 14 files ship in the
   wheel, which is what an agent actually consumes.
 - **This file is not in the lint loop.** CI validates
   `src/dcc_mcp_capcut/skills/capcut-*` with `dcc-mcp-cli lint --warnings-as-errors`
@@ -28,6 +28,8 @@ description of any CapCut capability.
   supply (never the bridge), and `capcut-native` talks to the optional Qt probe
   endpoint instead of the bridge and panel (it still needs the bound host PID).
   Do not run `capcut-setup`, and do not reject a call, for those three.
+  `capcut-batch` is host-free for `render_batch_template` and `batch_status`,
+  and drives the same bound window for `run_batch`.
   See `src/dcc_mcp_capcut/skills/references/host-boundary.md`.
 
 ## Skill index
@@ -39,6 +41,7 @@ description of any CapCut capability.
 | `capcut-media` | Import, list, relink, proxy, and bin removal of media. |
 | `capcut-timeline` | Timeline creation and clip/transition editing. |
 | `capcut-assemble` | One-call assembly of a canonical edit plan plus a media directory into CapCut. |
+| `capcut-batch` | Template plus N variable sets becomes N rendered, individually receipted deliverables; failure isolation and resume. |
 | `capcut-text` | Text overlays, subtitle import, auto-captions. |
 | `capcut-audio` | Audio placement, level, and fades. |
 | `capcut-effects` | Effects and color adjustment. |

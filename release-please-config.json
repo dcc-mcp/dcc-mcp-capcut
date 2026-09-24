@@ -19,6 +19,7 @@
         "src/dcc_mcp_capcut/skills/capcut-asr/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-assemble/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-audio/SKILL.md",
+        "src/dcc_mcp_capcut/skills/capcut-batch/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-effects/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-export/SKILL.md",
         "src/dcc_mcp_capcut/skills/capcut-interchange/SKILL.md",

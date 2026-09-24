@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Optional matching Qt 6 probe; Windows, macOS, Linux protocol"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.3.0", layer: domain, stage: scene, tags: "capcut, native, qt, diagnostics", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.4.0", layer: domain, stage: scene, tags: "capcut, native, qt, diagnostics", tools: tools.yaml}  # x-release-please-version
 ---
 
 The operator must configure the optional probe endpoint, token, executable hash,

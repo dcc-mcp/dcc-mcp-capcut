@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.3.0...v0.4.0) (2026-09-24)
+
+
+### Features
+
+* **export:** add an opt-in export receipt for size, duration and streams ([#26](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/26)) ([ccb75e5](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/ccb75e5eba5fbe1ac41c6781ded540676b144a21))
+* **host:** read the Windows host version from the .exe version resource ([#29](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/29)) ([951427e](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/951427edb4681c0248141e7f1c8bd4b69f0e9162))
+
 ## [0.3.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.2.0...v0.3.0) (2026-09-24)
 
 

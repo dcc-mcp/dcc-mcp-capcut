@@ -119,6 +119,139 @@ Other rules for reading a job out:
    A host that returns only `output_path` satisfies 1 and 2 and skips 3 — for
    that path the file plus `ffprobe` *is* the whole completion proof.
 
+## Export receipt (opt-in)
+
+The default export contract proves only that a job was accepted. A caller that
+wants proof about the artifact asks for it: pass `verify_output: true` to
+`export_thumbnail` or `get_export_status`.
+
+**The asynchronous submits do not take the flag.** `export_video` and
+`build_vlog_demo` return a job acknowledgement and the artifact does not exist
+when they return, so a receipt cannot be demanded of them — doing so would cost
+the caller the `job_id` it needs to poll.
+
+**Poll first, then ask for the receipt.** A running job has no artifact to
+probe, so `get_export_status(verify_output: true)` fails closed until the job
+is terminal. Poll it without the flag until it reports a terminal state, then
+make one flagged call. Asking on every poll means the first one errors out and
+progress is never seen.
+
+The flag is strictly opt-in and defaults to `false`, so a caller that never
+passes it keeps exactly the contract it has today. When it is passed, the host
+must probe the rendered file and return the receipt under
+`verification.output`, and the adapter fails closed when the receipt is missing
+or incomplete.
+
+Two rules apply to every opted-in call, including the read-only one:
+
+- `verification.ok` must be `true`. `get_export_status` is exempt from the
+  mutation rules, but a receipt sitting under a readback the host did not vouch
+  for is not evidence. It gets its own error text rather than the mutation
+  wording, since "post-operation readback" points the wrong way for a poll.
+- When the result also carries an `output_path`, the receipt's `path` must
+  describe that same file. Paths are folded before comparison — backslashes are
+  treated as separators, `.` and `..` components collapse, and case is ignored
+  — so spelling does not reject an honest host, but a stale probe from an
+  earlier render, or the previous item in a batch, cannot stand in. The fold is
+  platform-independent: it does not use `os.path`, which would make the same
+  two spellings compare equal on Windows and unequal on a Linux runner.
+
+  Absent and unusable are not the same case. A result with no `output_path` —
+  the usual case for `get_export_status` — skips the comparison, because
+  guessing a path is worse than not checking. A result that carries one and it
+  is not a usable path (wrong type, or empty) is a broken host and is rejected:
+  a fail-closed module must not silently switch its own check off.
+
+The adapter never synthesises a receipt and never probes the file itself:
+duration and stream facts come from a probe the **host** runs (`ffprobe` or an
+equivalent). That is also why the receipt is opt-in — a host that cannot probe
+must be able to decline instead of failing every export for every caller.
+
+### `verification.output` fields
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `path` | string | yes | Non-empty path of the artifact that was probed. |
+| `exists` | boolean | yes | Must be `true`. A receipt for a file that is not on disk is not a receipt. |
+| `size_bytes` | integer | yes | Size on disk. Must be `>= 1`; a zero-byte file is a failed render. |
+| `duration_sec` | number or null | conditional | Duration. Must be a **finite** number `> 0` when any stream is `video` or `audio`; must be omitted or `null` otherwise. `NaN` and `Infinity` are rejected. |
+| `streams` | array | yes | Non-empty list of stream objects. Which kinds are required depends on the action — see the stream-kind rules below. |
+| `width` | integer or null | no | Picture width, when the host knows it. Must be `>= 1` when present. |
+| `height` | integer or null | no | Picture height, when the host knows it. Must be `>= 1` when present. |
+| `probe` | object or null | no | How the receipt was measured. Optional, but a present `probe.tool` must be a non-empty string. |
+
+### `streams[]` fields
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `kind` | string | yes | One of `video`, `audio`, `image`, `subtitle`, `data`. |
+| `codec` | string | yes | Non-empty codec name. |
+| `width` | integer | for `video` and `image` | Must be `>= 1`. |
+| `height` | integer | for `video` and `image` | Must be `>= 1`. |
+| `fps` | number | no | Frames per second. Must be `> 0` when present. |
+| `channels` | integer | no | Audio channel count. Must be `>= 1` when present. |
+| `sample_rate_hz` | integer | no | Audio sample rate. Must be `>= 1` when present. |
+| `duration_sec` | number | no | Stream duration. Must be `> 0` when present. |
+| `bit_rate` | integer | no | Bitrate in bits per second. Must be `>= 0` when present. |
+
+Three cross-field rules do the real work:
+
+- **A deliverable has a picture.** A receipt whose streams are all `audio`,
+  `subtitle` or `data` is rejected: an audio-only artifact is not the video the
+  caller asked to export.
+- **The picture has to match the action.** `export_thumbnail` renders a still,
+  so it must report an `image` stream and no `video` or `audio` stream —
+  otherwise a host could satisfy a video export with a frame, or a thumbnail
+  with a whole clip. `get_export_status` is deliberately exempt from this rule:
+  it only holds a `job_id` and cannot know in advance whether the job renders
+  a video or a still, so it accepts either picture kind.
+- **Stills have no duration.** `duration_sec` is required exactly when a
+  `video` or `audio` stream is present. `export_thumbnail` reports one `image`
+  stream and omits it; a still that carries a duration is rejected rather than
+  ignored, because it means the host reported the timeline duration instead of
+  probing the file.
+
+`size_bytes` and every numeric field must be **finite**: `NaN` and `Infinity`
+are rejected. `json.loads` accepts those literals by default, so a host
+forwarding an `ffprobe` field reported as `N/A` would otherwise walk a
+non-value through every range check.
+
+### A video receipt
+
+```json
+{
+  "path": "C:/out/vlog.mp4",
+  "exists": true,
+  "size_bytes": 18345921,
+  "duration_sec": 42.5,
+  "width": 1080,
+  "height": 1920,
+  "streams": [
+    {"kind": "video", "codec": "h264", "width": 1080, "height": 1920, "fps": 30.0},
+    {"kind": "audio", "codec": "aac", "channels": 2, "sample_rate_hz": 48000}
+  ],
+  "probe": {"tool": "ffprobe", "version": "6.0"}
+}
+```
+
+### A still receipt
+
+```json
+{
+  "path": "C:/out/frame.png",
+  "exists": true,
+  "size_bytes": 204813,
+  "width": 1920,
+  "height": 1080,
+  "streams": [{"kind": "image", "codec": "png", "width": 1920, "height": 1080}],
+  "probe": {"tool": "ffprobe", "version": "6.0"}
+}
+```
+
+Batch delivery reports one of these per rendered item and reuses this field set
+verbatim, so the shape above is the contract to depend on rather than a
+per-caller dialect.
+
 ## Portable OpenTimelineIO export
 
 `export_otio` and the `python -m dcc_mcp_capcut.interchange` CLI convert explicit

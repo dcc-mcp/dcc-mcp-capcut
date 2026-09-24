@@ -1,6 +1,6 @@
 tools:
   - name: export_video
-    description: Export the active timeline to a video file with explicit codec settings.
+    description: Submit an asynchronous export of the active timeline to a video file with explicit codec settings. Returns a job acknowledgement, not the artifact. Poll get_export_status without verify_output until it reports a terminal state, then call it with verify_output for a probed receipt.
     input_schema: {type: object, required: [output_path], properties: {output_path: {type: string}, timeline_id: {type: string}, format: {type: string, enum: [mp4, mov]}, codec: {type: string, enum: [h264, h265, prores]}, width: {type: integer}, height: {type: integer}, fps: {type: number}, bitrate_mbps: {type: number}, audio: {type: boolean, default: true}}}
     read_only: false
     destructive: true
@@ -10,8 +10,8 @@ tools:
     timeout_hint_secs: 600
     source_file: scripts/export_video.py
   - name: get_export_status
-    description: Read progress and output validation for an export job.
-    input_schema: {type: object, required: [job_id], properties: {job_id: {type: string}}}
+    description: "Read progress for an export job, and a probed output receipt when the caller opts in with verify_output. Only ask for the receipt once the job is terminal - a running job has no artifact to probe, and the call then fails closed."
+    input_schema: {type: object, required: [job_id], properties: {job_id: {type: string}, verify_output: {type: boolean, default: false, description: "Opt in to the full export receipt: the host must probe the artifact and return size, duration and stream info under verification.output. Only valid once the job is terminal; a running job has no artifact to probe."}}}
     read_only: true
     destructive: false
     idempotent: true
@@ -28,8 +28,8 @@ tools:
     affinity: any
     source_file: scripts/cancel_export.py
   - name: export_thumbnail
-    description: Export a still frame thumbnail from the active timeline.
-    input_schema: {type: object, required: [output_path], properties: {output_path: {type: string}, time: {type: number, minimum: 0}, format: {type: string, enum: [png, jpg]}}}
+    description: Export a still frame thumbnail from the active timeline. Set verify_output to require a probed still-image receipt (size, dimensions, image stream).
+    input_schema: {type: object, required: [output_path], properties: {output_path: {type: string}, time: {type: number, minimum: 0}, format: {type: string, enum: [png, jpg]}, verify_output: {type: boolean, default: false, description: "Opt in to the full export receipt: the host must probe the still and return size, dimensions and an image stream under verification.output."}}}
     read_only: false
     destructive: true
     idempotent: true
@@ -37,7 +37,7 @@ tools:
     affinity: any
     source_file: scripts/export_thumbnail.py
   - name: build_vlog_demo
-    description: Build a complete short-form Vlog from supplied royalty-free media, captions, music, and export settings.
+    description: Build a complete short-form Vlog from supplied royalty-free media, captions, music, and export settings. Submits asynchronously; a job_id is not guaranteed, so pass an explicit output_path.
     input_schema: {type: object, required: [media], properties: {project_name: {type: string, default: Free Travel Vlog}, media: {type: array, items: {type: object}}, music: {type: object}, captions: {type: array}, output_path: {type: string}, aspect_ratio: {type: string, enum: [9:16, 16:9, 1:1]}}}
     read_only: false
     destructive: true

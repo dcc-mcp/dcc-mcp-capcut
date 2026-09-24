@@ -32,6 +32,19 @@ mixing/fades, effects and color, AI helpers (background removal/stabilization),
 video/thumbnail export, one-call assembly of a whole edit plan, and a complete
 `build_vlog_demo` recipe.
 
+### Export receipt
+
+`export_thumbnail` and `get_export_status` accept an opt-in `verify_output`
+flag. Left off, a result proves only that the job was accepted — the contract
+every caller has today. Set it and the host must probe the rendered artifact and
+return `path`, `exists`, `size_bytes`, `duration_sec` (timed media only; a still
+omits it) and `streams` under `verification.output`, or the call fails closed.
+The asynchronous submits `export_video` and `build_vlog_demo` do not take the
+flag: they return a job acknowledgement and the artifact does not exist yet, so
+their receipt comes from `get_export_status`. Batch delivery reports one receipt
+per rendered item and reuses the same field set. The normative table lives in
+[the export and verification reference](src/dcc_mcp_capcut/skills/references/export-and-verification.md).
+
 ## Run locally
 
 ```powershell

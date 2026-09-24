@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
+
+from dcc_mcp_capcut.export_receipt import (
+    EXPORT_RECEIPT_ACTIONS,
+    RECEIPT_KEY,
+    receipt_requested,
+    validate_export_receipt,
+)
 
 _MUTATING_ACTIONS = {
     "add_audio",
@@ -88,13 +95,26 @@ def _has_value(result: dict[str, Any], keys: tuple[str, ...]) -> bool:
     return any(result.get(key) not in (None, "", []) for key in keys)
 
 
-def validate_host_result(action: str, result: Any) -> dict[str, Any]:
-    """Require authoritative receipts before a mutation can report success."""
+def validate_host_result(
+    action: str, result: Any, *, params: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
+    """Require authoritative receipts before a mutation can report success.
+
+    ``params`` is the request the caller sent. It is read for one thing only:
+    the opt-in ``verify_output`` flag. A caller that never asks for the export
+    receipt keeps the contract it has today; one that does ask is held to it,
+    including on read-only actions that are otherwise exempt.
+    """
     if not isinstance(result, dict):
         raise RuntimeError(f"CapCut action '{action}' returned a non-object result")
-    if action not in _MUTATING_ACTIONS:
-        return result
+    if action in _MUTATING_ACTIONS:
+        _validate_mutation(action, result)
+    if action in EXPORT_RECEIPT_ACTIONS and receipt_requested(params):
+        _validate_requested_receipt(action, result)
+    return result
 
+
+def _validate_mutation(action: str, result: dict[str, Any]) -> None:
     verification = result.get("verification")
     if not isinstance(verification, dict) or verification.get("ok") is not True:
         raise RuntimeError(f"CapCut action '{action}' lacks verified post-operation readback")
@@ -109,4 +129,26 @@ def validate_host_result(action: str, result: Any) -> dict[str, Any]:
         if not isinstance(timeline, dict):
             raise RuntimeError(f"CapCut action '{action}' lacks timeline readback")
 
-    return result
+
+def _validate_requested_receipt(action: str, result: dict[str, Any]) -> None:
+    """Hold an opted-in export call to the full receipt even when read-only.
+
+    ``get_export_status`` reports on a job without mutating anything, so the
+    export receipt is the only contract rule that ever applies to it -- and it
+    applies only because the caller asked for it. It still has to carry
+    ``verification.ok: true``, because a receipt under a readback the host did
+    not vouch for is not evidence.
+    """
+    verification = result.get("verification")
+    if not isinstance(verification, dict) or verification.get("ok") is not True:
+        # "post-operation readback" is the right wording for a mutation and the
+        # wrong one for a status poll, so the two get different messages.
+        if action in _MUTATING_ACTIONS:
+            raise RuntimeError(f"CapCut action '{action}' lacks verified post-operation readback")
+        raise RuntimeError(
+            f"CapCut action '{action}' cannot report an export receipt without "
+            "verification.ok: true"
+        )
+    validate_export_receipt(
+        action, verification.get(RECEIPT_KEY), expected_path=result.get("output_path")
+    )

@@ -20,7 +20,10 @@ def make_entry(action: str, *, require_grant: bool = False):
     def main(**kwargs):
         if require_grant and not kwargs.get("grant_id"):
             raise ValueError(GRANT_REQUIRED)
-        result = validate_host_result(action, call_bridge(action, kwargs))
+        # The request is passed to the validator so an opt-in flag such as
+        # verify_output can tighten this call's contract without tightening
+        # anybody else's.
+        result = validate_host_result(action, call_bridge(action, kwargs), params=kwargs)
         return skill_success(f"CapCut action '{action}' completed.", action=action, **result)
 
     return main

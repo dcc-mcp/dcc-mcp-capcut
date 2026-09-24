@@ -5,7 +5,7 @@ license: MIT
 compatibility: "CapCut Desktop; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.3.0", layer: domain, stage: scene, tags: "capcut, ai, captions", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.4.0", layer: domain, stage: scene, tags: "capcut, ai, captions", tools: tools.yaml}  # x-release-please-version
 ---
 
 Two host-side assisted operations, exposed as explicit typed actions rather than

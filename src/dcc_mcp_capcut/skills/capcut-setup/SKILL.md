@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Windows CapCut/JianyingPro Desktop, macOS CapCut/JianyingPro (剪映专业版) bundles; Linux unsupported; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.3.0", layer: infrastructure, stage: setup, tags: "capcut, install, setup, readiness", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.4.0", layer: infrastructure, stage: setup, tags: "capcut, install, setup, readiness", tools: tools.yaml}  # x-release-please-version
 ---
 
 Run this skill **first**, before any other `capcut-*` skill. Everything else in

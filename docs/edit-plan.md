@@ -127,8 +127,9 @@ optional, and an `output` block that is present must carry at least one:
 
 `reframe` and `export` are consumed by the assembly and batch links and are
 dropped by `plan_to_edl` along with every other presentation field. The
-arithmetic they describe is computed by `batch.resolve_reframe` and
-`batch.resolve_export`; the plan itself only carries the declaration, so one
+arithmetic they describe is computed by `delivery.resolve_reframe` and
+`delivery.resolve_export`, which `editplan` and the batch link both import;
+the plan itself only carries the declaration, so one
 document still means one thing to every consumer. See
 [`docs/batch-and-templates.md`](batch-and-templates.md).
 

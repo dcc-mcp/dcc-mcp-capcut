@@ -53,6 +53,7 @@ from typing import Any, Optional
 # assembly link, so one document cannot get two verdicts.
 from .delivery import check_canvas_aspect, resolve_export, resolve_reframe
 from .editplan import DEFAULT_FPS, compile_plan
+from .export_receipt import normalize_path
 
 BATCH_SCHEMA = "dcc-mcp-capcut/batch/v1"
 
@@ -224,21 +225,29 @@ def _fail_duplicate_destinations(items: list[dict[str, Any]]) -> None:
     produce.
 
     Caught here, at build time, so no render is spent discovering it.
+
+    Paths are folded through the same function the receipt bind uses, not
+    compared as strings. ``out/./promo.mp4`` and ``out//promo.mp4`` are one file,
+    and on the default Windows and macOS filesystems ``promo_EN.mp4`` and
+    ``promo_en.mp4`` are one file too -- both would be two renders into one
+    artifact that then passes every receipt check, because the bind folds the
+    same way. A guard that folds differently from the check it feeds is no guard.
     """
     owners: dict[str, int] = {}
     for item in items:
         path = item["output_path"]
         if item["state"] == "failed" or not path:
             continue
-        if path in owners:
+        folded = normalize_path(path)
+        if folded in owners:
             item["state"] = "failed"
             item["error"] = (
-                f"output.path {path!r} is already used by item {owners[path]}; every "
+                f"output.path {path!r} is already used by item {owners[folded]}; every "
                 "batch item needs a distinct destination, or the later render "
                 "silently overwrites the earlier one"
             )
         else:
-            owners[path] = item["index"]
+            owners[folded] = item["index"]
 
 
 def _item(index: int, variables: dict[str, Any]) -> dict[str, Any]:
@@ -452,14 +461,30 @@ def skip_item(manifest: dict[str, Any], index: int, reason: str) -> dict[str, An
     return item
 
 
-def select_items(manifest: dict[str, Any], *, retry_failed: bool = False) -> list[int]:
+def select_items(
+    manifest: dict[str, Any], *, retry_failed: bool = False, retry_skipped: bool = False
+) -> list[int]:
     """The indices still worth attempting, in order.
 
-    ``retry_failed`` is what resume turns on: a failed item is the one thing a
-    second run exists to fix, and it costs nothing to attempt again because a
-    render is idempotent per output path. A ``done`` item is never re-attempted.
+    ``retry_failed`` is what a second run exists for: a failed item is the one
+    a resumed run can fix, and re-attempting it costs nothing because a render
+    is idempotent per output path.
+
+    ``retry_skipped`` is what makes a **stopped** batch finishable. Both paths
+    that stop a batch -- an export that overran its wait budget, and
+    ``continue_on_error=false`` -- mark the items they never reached as
+    ``skipped``. Those items were never attempted, so they are the most worth
+    running once the cause is dealt with. Selecting only ``pending`` would
+    leave every batch that ever stopped permanently short, and the documented
+    recovery for a stopped batch is exactly "deal with the job, then resume".
+
+    A ``done`` item is never re-attempted under either flag.
     """
-    wanted = {"pending"} if not retry_failed else {"pending", "failed"}
+    wanted = {"pending"}
+    if retry_failed:
+        wanted.add("failed")
+    if retry_skipped:
+        wanted.add("skipped")
     return [item["index"] for item in manifest["items"] if item["state"] in wanted]
 
 

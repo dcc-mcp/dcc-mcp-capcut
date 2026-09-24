@@ -452,6 +452,35 @@ def test_two_items_may_not_render_to_the_same_destination():
     assert manifest["items"][0]["output_path"] == "out/promo.mp4"
 
 
+def test_a_destination_is_compared_the_way_the_receipt_bind_compares_it():
+    """The guard has to fold paths the way the check it feeds folds them.
+
+    ``out/./promo.mp4`` and ``out//promo.mp4`` are one file, and on the default
+    Windows and macOS filesystems ``EN`` and ``en`` are one name. A string
+    comparison misses both, while the receipt bind -- which folds -- happily
+    accepts either, so two renders land in one artifact and both receipts pass.
+    """
+    from dcc_mcp_capcut.export_receipt import normalize_path
+
+    for variants in (
+        [{"dir": "", "lang": "en"}, {"dir": ".", "lang": "en"}],
+        [{"dir": "sub", "lang": "en"}, {"dir": "sub/", "lang": "en"}],
+        [{"dir": "x", "lang": "EN"}, {"dir": "x", "lang": "en"}],
+    ):
+        template = dict(TEMPLATE, project_name="p", output_path="out/{{dir}}/promo_{{lang}}.mp4")
+        manifest = build_batch(
+            template,
+            [dict(one, aspect="9:16", length=4) for one in variants],
+            require_output=False,
+        )
+        paths = [item["output_path"] for item in manifest["items"]]
+
+        # The receipt bind considers these the same file...
+        assert normalize_path(paths[0]) == normalize_path(paths[1])
+        # ...so the collision guard has to as well.
+        assert [item["state"] for item in manifest["items"]] == ["pending", "failed"]
+
+
 def test_a_duplicate_destination_is_also_reported_while_inspecting():
     # Inspection is the cheap moment to find this, so the collision is
     # reported there too rather than only once a batch starts rendering.
@@ -619,6 +648,27 @@ def test_a_failed_item_keeps_its_reason_and_the_rest_keep_their_state():
     assert states == ["done", "failed", "skipped"]
     assert manifest["items"][1]["error"] == "bridge did not respond"
     assert summarize(manifest)["complete"] is False
+
+
+def test_a_stopped_batch_is_resumable_to_the_end():
+    """The items a stopped batch never reached must come back.
+
+    Both paths that stop a batch mark the remaining items ``skipped``. If
+    ``select_items`` only ever offered ``pending`` and ``failed``, a batch that
+    stopped once could never be finished -- and the documented recovery for a
+    stopped batch is precisely "deal with the job, then resume". A batch of
+    forty will meet one timeout.
+    """
+    manifest = build_batch(TEMPLATE, VARIABLES)
+    complete_item(manifest, 0)
+    fail_item(manifest, 1, "boom")
+    skip_item(manifest, 2, "batch stopped after item 1 failed")
+
+    # A plain retry leaves the skipped item where it is: retry_failed and
+    # retry_skipped are different decisions, and only a resume makes both.
+    assert select_items(manifest) == []
+    assert select_items(manifest, retry_failed=True) == [1]
+    assert select_items(manifest, retry_failed=True, retry_skipped=True) == [1, 2]
 
 
 def test_a_delivered_item_is_never_selected_again():
@@ -1054,6 +1104,96 @@ def test_resume_keeps_delivered_items_and_retries_failures(run_skill, media_dir,
     # must not submit a second export to a destination that already has one.
     assert run_skill.host.exports == 3
     assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
+
+
+def test_a_batch_stopped_by_a_failure_finishes_on_resume(run_skill, media_dir, tmp_path):
+    """End to end: stop on failure, fix the cause, resume, deliver all three."""
+    manifest = tmp_path / "batch.json"
+    run_skill.host.fail_export_for = {"job-1"}
+    stopped = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+            continue_on_error=False,
+        )
+    )
+    assert [item["state"] for item in stopped["items"]] == ["failed", "skipped", "skipped"]
+
+    # The cause is fixed; the items the batch never reached must now run.
+    run_skill.host.fail_export_for = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert context["complete"] is True
+    assert context["counts"] == {"pending": 0, "running": 0, "done": 3, "failed": 0, "skipped": 0}
+    assert run_skill.host.exports == 3
+
+
+def test_a_batch_stopped_by_a_timeout_finishes_on_resume(run_skill, media_dir, tmp_path):
+    """End to end: stop on an overrun, settle the job, resume, deliver all three."""
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    stopped = ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    assert [item["state"] for item in stopped["items"]] == ["done", "failed", "skipped"]
+    assert "stopped" in stopped
+
+    # The abandoned render turns out to have finished after all.
+    run_skill.host.stalled_jobs = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert context["complete"] is True
+    # Item 1 was settled from the job the first run paid for; only item 2 is new.
+    assert run_skill.host.exports == 3
+
+
+def test_an_orphan_that_cannot_be_receipted_fails_only_itself(run_skill, media_dir, tmp_path):
+    """The orphan settle pass is inside failure isolation, like every item.
+
+    A job that reports done but cannot produce a receipt is that item's problem.
+    Escalating it would abandon the whole resume before a single render -- and
+    the manifest is not written yet at that point, so nothing would be recorded.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.fail_export_for = {"job-1", "job-2"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+
+    # Item 0's abandoned job finished but yields no receipt; item 1's ended in
+    # a terminal failure, so it is free to re-export.
+    run_skill.host.fail_export_for = {"job-2"}
+    run_skill.host.no_receipt_for = {"job-1"}
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    # ok() above already asserts the envelope succeeded: the resume carried on
+    # instead of dying on the one un-receiptable job before rendering anything.
+    assert [item["state"] for item in context["items"]] == ["failed", "done", "done"]
+    assert "verification.output" in context["items"][0]["error"]
+    # Item 1 was re-exported (job-4) and item 2 kept its earlier render, so the
+    # failure stayed with item 0 rather than emptying the batch.
+    assert run_skill.host.exports == 4
+    # Item 1 was re-exported rather than settled, so the failed item's job is
+    # still the one the first run submitted.
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["job_id"] == "job-4"
+    assert stored["items"][0]["job_id"] == "job-1"
 
 
 def test_a_resume_renders_again_only_when_the_orphan_job_ended(run_skill, media_dir, tmp_path):

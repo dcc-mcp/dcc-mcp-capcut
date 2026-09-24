@@ -159,6 +159,12 @@ def _settle_orphaned_jobs(
     * ``done`` — it finished after all; settle it from that job.
     * any other terminal state — the job is over, so a re-export is safe.
     * still running — the batch cannot continue, and says which job holds it.
+
+    Each orphan is settled **inside the loop's own failure isolation**: a job
+    that reports done but cannot produce a receipt is that item's problem, not
+    the whole resume's. Letting it propagate would abandon every other item in
+    the batch -- and the manifest is not written yet at this point, so the
+    failure would not even be recorded.
     """
     remaining: list[int] = []
     for index in indices:
@@ -167,19 +173,26 @@ def _settle_orphaned_jobs(
         if item["state"] != "failed" or not job_id:
             remaining.append(index)
             continue
-        status = dispatch("get_export_status", {"job_id": job_id})
-        state = status.get("state")
-        if state == SUCCESS_EXPORT_STATE:
-            receipt = _read_receipt(
-                job_id, output_path=item["output_path"], verify_output=verify_output
-            )
-            complete_item(
-                manifest,
-                index,
-                timeline_id=item.get("timeline_id"),
-                job_id=job_id,
-                receipt=receipt,
-            )
+        try:
+            status = dispatch("get_export_status", {"job_id": job_id})
+            state = status.get("state")
+            if state == SUCCESS_EXPORT_STATE:
+                receipt = _read_receipt(
+                    job_id, output_path=item["output_path"], verify_output=verify_output
+                )
+                complete_item(
+                    manifest,
+                    index,
+                    timeline_id=item.get("timeline_id"),
+                    job_id=job_id,
+                    receipt=receipt,
+                )
+                continue
+        except (RuntimeError, OSError, ValueError) as error:
+            # Settle it as this item's failure and keep going: the destination
+            # is still occupied by a finished render, so it is re-exported only
+            # when the operator asks for it by resuming again.
+            fail_item(manifest, index, error)
             continue
         if state in TERMINAL_EXPORT_STATES:
             # The job ended without a deliverable, so the destination is free.
@@ -335,10 +348,14 @@ def main(
     summary = summarize(manifest)
     if dry_run:
         # A dry run promises to touch nothing, and that includes the manifest:
-        # writing it would make the next resume believe renders happened.
+        # writing it would make the next resume believe renders happened. The
+        # caller's own path is still echoed back -- with manifest_written false,
+        # so a dry run over a resumed batch does not look like one that saved
+        # its state.
         return skill_success(
             f"Compiled {summary['total']} batch item(s); no host action was dispatched.",
-            manifest_path=None,
+            manifest_path=manifest_path,
+            manifest_written=False,
             dispatched=False,
             **summary,
         )
@@ -352,7 +369,7 @@ def main(
     if manifest_path and not resume:
         fresh_overwrite_check(manifest_path)
 
-    indices = select_items(manifest, retry_failed=retry_failed or resume)
+    indices = select_items(manifest, retry_failed=retry_failed or resume, retry_skipped=resume)
     # Asked before anything is dispatched: a job left running by an earlier
     # interrupted run would otherwise be joined by a second export to the same
     # destination. Nothing has been touched yet, so there is no state to save

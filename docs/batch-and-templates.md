@@ -32,7 +32,7 @@ Rules, all fail-closed:
 - An undeclared variable, and a malformed double-brace one (`{{ lang`, `{{}}`),
   are errors naming the field. A placeholder never survives into the rendered
   plan as literal text — a typo would otherwise silently import the wrong file.
-  Single braces are ordinary text: `{lang}` stays `{lang}`.`
+  Single braces are ordinary text: `{lang}` stays `{lang}`.
 - Only strings and numbers interpolate into a longer string. A boolean or
   `null` there would become the text `True` or `None`, which is never intended.
 - A whole-value placeholder takes a scalar only. A variable that injects an
@@ -87,9 +87,10 @@ A batch fails one item at a time.
 | Write | The manifest at `manifest_path` is rewritten atomically after every item, so an interruption costs at most the item in flight. |
 
 Resume with `run_batch(manifest_path=..., resume=true)`: delivered items are
-left alone, `pending` and `failed` items are attempted again. A fresh run never
-overwrites an existing manifest — that file is the record of renders already
-paid for.
+left alone, `pending`, `failed` and `skipped` items are attempted again — the
+last of those being the items a stopped batch never reached, without which a
+batch that stopped once could never be finished. A fresh run never overwrites
+an existing manifest — that file is the record of renders already paid for.
 
 ## Receipts
 

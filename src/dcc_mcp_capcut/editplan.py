@@ -496,9 +496,10 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             require_text(normalized["output"]["aspect_ratio"], "output aspect_ratio")
         # The two directives are passed through as objects, not interpreted
         # here: the canvas arithmetic and the encode vocabulary are owned by
-        # ``batch``, and a plan carries them so one document still means one
-        # thing to every consumer. Rejecting a non-object early is what keeps
-        # them from arriving at that module as something it cannot read.
+        # ``delivery``, which both this module and the batch link import, so
+        # one document still means one thing to every consumer. Rejecting a
+        # non-object early is what keeps them from arriving at that module as
+        # something it cannot read.
         for key in ("reframe", "export"):
             if key in normalized["output"] and not isinstance(normalized["output"][key], dict):
                 raise ValueError(f"output {key} must be an object")

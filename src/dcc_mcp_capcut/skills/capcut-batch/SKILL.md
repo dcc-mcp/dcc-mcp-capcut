@@ -152,9 +152,11 @@ A batch fails one item at a time:
   — crash, timeout, closed laptop — costs at most the item in flight.
 
 To continue: `run_batch(manifest_path=..., resume=true)`. Delivered items are
-left alone; `pending` and `failed` items are attempted again. A fresh run will
-never overwrite an existing manifest — that file is the record of renders you
-have already paid for.
+left alone; `pending`, `failed` **and `skipped`** items are attempted again —
+including the items a stopped batch never reached, which is the whole point,
+since a batch that stopped is otherwise unfinishable. A fresh run will never
+overwrite an existing manifest — that file is the record of renders you have
+already paid for.
 
 A resumed item that failed **after** its export was submitted is asked about
 before anything is re-rendered, because that job may still be out there:
@@ -206,7 +208,9 @@ If the first three are unproven, run `capcut-setup` first.
 - `run_batch` reports `counts.done` equal to the number of variable sets, and
   `counts.failed` and `counts.skipped` both zero.
 - Every delivered item carries a `receipt` from the host describing the
-  artifact it actually produced, not the one it was asked to produce.
+  artifact it actually produced — and the adapter has already bound that
+  receipt to the destination this item asked for, so it cannot be a
+  description of some other item's render.
 - Every item's `output_path` is distinct, and a file exists at each.
 - The `reframe` report on each item matches what the canvas preset says, and
   any `cropped: true` item names the `safe_area` that permitted it.

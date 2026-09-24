@@ -1931,3 +1931,256 @@ def test_an_orphan_the_host_later_describes_is_re_rendered(run_skill, media_dir,
     stored = load_batch(str(manifest))
     assert stored["items"][1]["job_id"] == "job-4"
     assert stored["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
+
+
+def test_two_orphans_the_first_settlement_survives_the_second(run_skill, media_dir, tmp_path):
+    """A settlement must outlive the refusal that follows it.
+
+    Item 1's abandoned job reports done, so the reconciliation settles it from
+    that render; item 2's is still rendering, so the batch stops. The
+    reconciliation loop leaves by raising, and the manifest used to be written
+    only after it returned -- so a settlement this run had already paid for was
+    silently dropped, and the next resume would ask the same question again.
+    """
+    manifest = tmp_path / "batch.json"
+    batch = build_batch(TEMPLATE, VARIABLES, media_dir=str(media_dir), require_output=True)
+    items = batch["items"]
+    # Two orphans, as an interrupted run would leave them: item 1 failed with a
+    # job that has since finished, item 2 left running with a job still going.
+    items[0]["state"] = "done"
+    items[0]["job_id"] = "job-1"
+    items[1]["state"] = "failed"
+    items[1]["job_id"] = "job-2"
+    items[1]["error"] = "export job 'job-2' did not reach a terminal state within 600s"
+    items[2]["state"] = "running"
+    items[2]["job_id"] = "job-3"
+    save_batch(str(manifest), batch)
+    # Planted jobs were never dispatched through this host, so teach it the
+    # destination each was submitted for -- that is what a receipt is checked
+    # against.
+    run_skill.host.destinations = {
+        "job-2": items[1]["output_path"],
+        "job-3": items[2]["output_path"],
+    }
+
+    # job-2 finished after all, so item 1 should be settled; job-3 is still
+    # rendering, so the batch must stop rather than dispatch into it.
+    run_skill.host.stalled_jobs = {"job-3"}
+    result = run_skill.main(manifest_path=str(manifest), resume=True)
+
+    assert result["success"] is False
+    assert "still has export job 'job-3'" in result["message"]
+
+    # Stopping is right. Losing item 1's settlement on the way out is not: the
+    # batch spent nothing to learn that job-2 finished, and the next resume
+    # would settle it again from a receipt it already has.
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["state"] == "done", stored["items"][1]
+    assert stored["items"][1]["error"] is None
+    assert stored["items"][1]["receipt"]["path"] == items[1]["output_path"]
+    # The refusal is about item 2, and it is still the batch-level verdict.
+    assert stored["items"][2]["state"] == "running"
+
+
+def test_an_unnamed_export_keeps_the_reason_it_was_never_named(run_skill, media_dir, tmp_path):
+    """A refusal must not erase the error that caused it.
+
+    An export the host acknowledged without a ``job_id`` leaves an item with
+    ``in_flight`` still set, and every later resume refuses to re-export into
+    that destination. The refusal is the adapter's verdict; the error from the
+    run that dispatched it is the only evidence there is -- the adapter cannot
+    ask the host about an export it cannot name. Replacing one with the other
+    leaves an operator knowing what was decided and not why.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.omit_job_id_for = {"out/promo_zh_9:16.mp4"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    stored = load_batch(str(manifest))
+    original = stored["items"][1]["error"]
+    assert "acknowledged the job without a job_id" in original
+    assert stored["items"][1]["in_flight"] is True
+
+    # A resume still cannot name it, so it still refuses -- but the reason the
+    # last run left behind has to survive alongside the refusal.
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    error = context["items"][1]["error"]
+    assert "may already have an export in flight" in error
+    assert "acknowledged the job without a job_id" in error
+    # Refusing to re-export is unchanged: nothing was sent to that
+    # destination, and the marker that says one may be in flight stays set.
+    assert run_skill.host.exports == 3
+    assert load_batch(str(manifest))["items"][1]["in_flight"] is True
+
+
+def test_the_refusal_is_appended_once_however_often_the_batch_is_resumed(
+    run_skill, media_dir, tmp_path
+):
+    """A stuck batch gets resumed repeatedly; its error must not grow.
+
+    The refusal is joined onto whatever error the item already carries, and
+    that joined result is what ``fail_item`` writes back -- so appending
+    unconditionally re-joins the previous attempt's output on every resume,
+    burying the cause under a fresh copy of the verdict each time. A batch that
+    stays stuck is exactly the one that gets resumed again and again.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.omit_job_id_for = {"out/promo_zh_9:16.mp4"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    first = load_batch(str(manifest))["items"][1]["error"]
+    assert "acknowledged the job without a job_id" in first
+    assert "may already have an export in flight" not in first
+
+    lengths = []
+    for _ in range(3):
+        ok(run_skill.main(manifest_path=str(manifest), resume=True))
+        error = load_batch(str(manifest))["items"][1]["error"]
+        # The cause is still there, and the verdict is stated exactly once.
+        assert "acknowledged the job without a job_id" in error
+        assert error.count("may already have an export in flight") == 1
+        lengths.append(len(error))
+
+    # Bounded: the second and every later resume say the same thing.
+    assert len(set(lengths)) == 1, lengths
+
+
+def test_two_orphans_the_first_failure_survives_the_second(run_skill, media_dir, tmp_path):
+    """The failure half of the same gap: a verdict must outlive a refusal.
+
+    The gap was reported as "the earlier item's failure never reaches the
+    manifest". The settlement half is covered by the test above; this is the
+    failure half -- item 1's job is unreadable, so it is failed and keeps its
+    ``job_id``, and item 2's is still rendering, so the batch refuses. The
+    refusal must not take item 1's error down with it.
+    """
+    manifest = tmp_path / "batch.json"
+    batch = build_batch(TEMPLATE, VARIABLES, media_dir=str(media_dir), require_output=True)
+    items = batch["items"]
+    items[0]["state"] = "done"
+    items[0]["job_id"] = "job-1"
+    items[1]["state"] = "failed"
+    items[1]["job_id"] = "job-2"
+    items[1]["error"] = "export job 'job-2' did not reach a terminal state within 600s"
+    items[2]["state"] = "running"
+    items[2]["job_id"] = "job-3"
+    save_batch(str(manifest), batch)
+
+    # job-2 cannot be described at all, so item 1 is failed from it; job-3 is
+    # still rendering, so the batch must stop rather than dispatch into it.
+    run_skill.host.stateless_jobs = {"job-2"}
+    run_skill.host.stalled_jobs = {"job-3"}
+    result = run_skill.main(manifest_path=str(manifest), resume=True)
+
+    assert result["success"] is False
+    assert "still has export job 'job-3'" in result["message"]
+
+    stored = load_batch(str(manifest))
+    # Item 1's verdict survived the refusal, along with the handle the next
+    # resume needs to ask the host about job-2 again.
+    assert stored["items"][1]["state"] == "failed"
+    assert "no 'state'" in stored["items"][1]["error"]
+    assert stored["items"][1]["job_id"] == "job-2"
+
+
+def test_two_orphans_a_forced_rerender_failure_survives_the_second(run_skill, media_dir, tmp_path):
+    """The forced path has the same obligation as the default one.
+
+    ``force_rerender=true`` asks the host about the abandoned job too, and an
+    unreadable answer fails that item and leaves it alone. When a later item
+    refuses to continue, that verdict has to be on disk for the same reason it
+    does on the default path -- otherwise the forced path is a second copy of
+    the gap this PR set out to close.
+    """
+    manifest = tmp_path / "batch.json"
+    batch = build_batch(TEMPLATE, VARIABLES, media_dir=str(media_dir), require_output=True)
+    items = batch["items"]
+    items[0]["state"] = "done"
+    items[0]["job_id"] = "job-1"
+    items[1]["state"] = "failed"
+    items[1]["job_id"] = "job-2"
+    items[1]["error"] = "export job 'job-2' did not reach a terminal state within 600s"
+    items[2]["state"] = "running"
+    items[2]["job_id"] = "job-3"
+    save_batch(str(manifest), batch)
+
+    # job-2 is unreadable even under force_rerender; job-3 is still rendering.
+    run_skill.host.stateless_jobs = {"job-2"}
+    run_skill.host.stalled_jobs = {"job-3"}
+    result = run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True)
+
+    assert result["success"] is False
+    assert "still has export job 'job-3'" in result["message"]
+
+    stored = load_batch(str(manifest))
+    # The forced verdict survived, and it kept the handle -- it was refused, so
+    # it must not have been released.
+    assert stored["items"][1]["state"] == "failed"
+    assert "no 'state'" in stored["items"][1]["error"]
+    assert stored["items"][1]["job_id"] == "job-2"
+
+
+def test_a_manifest_that_cannot_be_written_is_not_an_item_failure(
+    run_skill, media_dir, tmp_path, monkeypatch
+):
+    """A failed write is not a verdict on the item.
+
+    The settlement checkpoint sits outside the per-item failure isolation on
+    purpose. Inside it, an ``OSError`` from ``save_batch`` is caught by the
+    handler that turns any error into ``fail_item`` -- so an item that had just
+    been delivered, receipt and all, is recorded as failed while the batch goes
+    on to report success. Nobody is alerted, and a resume re-asks about a render
+    that is already finished.
+
+    Only the one write after the settlement fails; the rest of the batch runs,
+    which is what lets the batch claim success over the mislabeled item.
+    """
+    manifest = tmp_path / "batch.json"
+    batch = build_batch(TEMPLATE, VARIABLES, media_dir=str(media_dir), require_output=True)
+    items = batch["items"]
+    items[0]["state"] = "done"
+    items[0]["job_id"] = "job-1"
+    items[1]["state"] = "failed"
+    items[1]["job_id"] = "job-2"
+    items[1]["error"] = "export job 'job-2' did not reach a terminal state within 600s"
+    save_batch(str(manifest), batch)
+    run_skill.host.destinations = {"job-2": items[1]["output_path"]}
+
+    real = run_skill.save_batch  # patch the name this module actually calls
+    fired = {"once": False}
+
+    def flaky(path, man):
+        if (
+            man["items"][1]["state"] == "done"
+            and man["items"][1].get("receipt")
+            and not fired["once"]
+        ):
+            fired["once"] = True
+            raise OSError("transient write failure")
+        return real(path, man)
+
+    monkeypatch.setattr(run_skill, "save_batch", flaky)
+    result = run_skill.main(manifest_path=str(manifest), resume=True)
+
+    assert fired["once"] is True  # the scenario really was exercised
+    # The batch says so, instead of reporting success over a delivered item it
+    # has just recorded as failed.
+    assert result["success"] is False
+    assert "transient write failure" in result["message"]
+    # And the item was not convicted: no write error dressed up as an export
+    # failure on the item that did get delivered.
+    stored = load_batch(str(manifest))
+    assert "transient write failure" not in (stored["items"][1]["error"] or "")

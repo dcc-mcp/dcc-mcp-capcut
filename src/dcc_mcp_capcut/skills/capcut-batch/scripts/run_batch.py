@@ -157,6 +157,30 @@ def _read_receipt(
 _UNSETTLED_ITEM_STATES = ("failed", "running")
 
 
+def _join_errors(previous: Optional[str], refusal: str) -> str:
+    """Keep the reason an item last failed when saying why it is refused now.
+
+    An item dispatched without a ``job_id`` coming back carries the error that
+    run recorded -- a bridge timeout, a host refusal -- and a later resume has
+    nothing else to go on: it cannot ask the host about an export it cannot
+    name. Overwriting that error with the refusal leaves an operator with the
+    adapter's verdict and none of the evidence behind it.
+
+    Both are kept, the earlier one first: the refusal is what the adapter
+    concluded, and the earlier error is what it concluded it from.
+
+    The refusal is appended **once**. A stuck batch gets resumed repeatedly,
+    and ``fail_item`` writes the joined result back into the very field this
+    reads -- so a naive append re-joins its own output on every attempt and the
+    error grows without bound, burying the cause under copies of the verdict.
+    """
+    if not previous:
+        return refusal
+    if refusal in previous:
+        return previous
+    return f"{previous} -- and a later resume still cannot settle it: {refusal}"
+
+
 def _job_state(job_id: str, index: int, item: dict[str, Any]) -> str:
     """Read one abandoned job, refusing to continue while it still renders."""
     status = dispatch("get_export_status", {"job_id": job_id})
@@ -182,6 +206,7 @@ def _settle_orphaned_jobs(
     *,
     verify_output: bool,
     force_rerender: bool = False,
+    manifest_path: Optional[str] = None,
 ) -> list[int]:
     """Find out what the last job of each interrupted item did before re-rendering.
 
@@ -214,6 +239,34 @@ def _settle_orphaned_jobs(
     window, and no flag makes dispatching into a busy one safe.
     """
     remaining: list[int] = []
+    settled: list[int] = []
+    try:
+        _settle(manifest, indices, remaining, settled, verify_output, force_rerender)
+    finally:
+        # Written as each orphan is settled rather than once at the end: the
+        # loop can also leave by raising ``HostStillRunning``, and a settlement
+        # that only ever lived in memory would be lost -- the batch would
+        # report a refusal and leave an item it had just settled looking
+        # unsettled on disk, so the next resume would ask the host again about
+        # a job this run had already paid for.
+        #
+        # Deliberately outside the per-item handler below: a write that fails
+        # is not a verdict on the item. Caught there it would record a
+        # *delivered* item as failed while its receipt sat right there, and the
+        # batch would go on to report success.
+        if settled:
+            _checkpoint(manifest_path, manifest)
+    return remaining
+
+
+def _settle(
+    manifest: dict[str, Any],
+    indices: list[int],
+    remaining: list[int],
+    settled: list[int],
+    verify_output: bool,
+    force_rerender: bool,
+) -> None:
     for index in indices:
         item = manifest["items"][index]
         job_id = item.get("job_id")
@@ -231,6 +284,7 @@ def _settle_orphaned_jobs(
                 raise
             except (RuntimeError, OSError, ValueError) as error:
                 fail_item(manifest, index, error)
+                settled.append(index)
                 continue
             item["job_id"] = None
             item["in_flight"] = False
@@ -241,13 +295,19 @@ def _settle_orphaned_jobs(
                 # The host acknowledged an export but never handed back a
                 # handle, and it exposes no way to look a job up by the
                 # destination it was submitted for -- so the only safe answer
-                # is to leave the destination alone and say why.
+                # is to leave the destination alone and say why. The refusal is
+                # *appended* to whatever the last run recorded: that error is
+                # the only trace of why no job_id ever came back, and erasing
+                # it would leave an operator with a verdict and no cause.
                 raise RuntimeError(
-                    f"item {index} may already have an export in flight to "
-                    f"{item['output_path']!r}: the last run dispatched one and did not "
-                    "record its job_id, so this adapter cannot ask the host whether it "
-                    "is still rendering. Check the destination and the CapCut window, "
-                    "then resume with force_rerender=true to render this item again."
+                    _join_errors(
+                        item.get("error"),
+                        f"item {index} may already have an export in flight to "
+                        f"{item['output_path']!r}: the last run dispatched one and did not "
+                        "record its job_id, so this adapter cannot ask the host whether it "
+                        "is still rendering. Check the destination and the CapCut window, "
+                        "then resume with force_rerender=true to render this item again.",
+                    )
                 )
             # Read through the same helper the forced path and the polling
             # loop use, so one host response means one thing everywhere: a
@@ -266,6 +326,7 @@ def _settle_orphaned_jobs(
                     job_id=job_id,
                     receipt=receipt,
                 )
+                settled.append(index)
                 continue
         except HostStillRunning:
             # The one failure isolation cannot absorb: that job is holding the
@@ -283,12 +344,12 @@ def _settle_orphaned_jobs(
             # the render that exists without proof, or ``force_rerender=true``
             # to pay for a new one.
             fail_item(manifest, index, error)
+            settled.append(index)
             continue
         # ``_job_state`` returns only terminal states, and a successful one was
         # settled above: what is left is a job that ended without a
         # deliverable, so the destination is free.
         remaining.append(index)
-    return remaining
 
 
 def _checkpoint(manifest_path: Optional[str], manifest: dict[str, Any]) -> None:
@@ -500,6 +561,7 @@ def main(
         indices,
         verify_output=verify_output,
         force_rerender=force_rerender,
+        manifest_path=manifest_path,
     )
     if manifest_path:
         # Written once before the first item so batch_status can see the batch

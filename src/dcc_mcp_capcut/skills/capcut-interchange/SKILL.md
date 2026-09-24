@@ -5,7 +5,7 @@ license: MIT
 compatibility: "dcc-mcp-capcut[interchange]; no CapCut host dispatch required"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.2.0", layer: domain, stage: delivery, tags: "capcut, otio, interchange, edit-plan", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.3.0", layer: domain, stage: delivery, tags: "capcut, otio, interchange, edit-plan", tools: tools.yaml}  # x-release-please-version
 ---
 
 This skill owns the **canonical edit plan** (`dcc-mcp-capcut/edit-plan/v1`), the

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.2.0...v0.3.0) (2026-09-24)
+
+
+### Features
+
+* **host:** add a machine-readable host version matrix and report the default bridge token ([#25](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/25)) ([9177a09](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/9177a09ddf70171f3cca1ae9b39dba52a4358fd8))
+
+
+### Bug Fixes
+
+* **tests:** read the skill version from the package instead of a literal ([#23](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/23)) ([5b18e24](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/5b18e247300d2fa501186b7cbe1812e9d42a6397))
+
 ## [0.2.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.1.0...v0.2.0) (2026-09-23)
 
 

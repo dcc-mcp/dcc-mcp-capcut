@@ -49,13 +49,26 @@ default stays `false`, so no existing caller is held to the stricter contract.
 **The two asynchronous submits do not take the flag.** `export_video` and
 `build_vlog_demo` return a job acknowledgement — the artifact does not exist
 when they return, so demanding a receipt from them would only cost the caller
-the `job_id` it needs to poll. Read a video export out with
-`get_export_status(verify_output: true)` instead.
+the `job_id` it needs to poll.
+
+**Poll first, then ask for the receipt.** A running job has no artifact to
+probe, so `get_export_status` with `verify_output: true` fails closed until the
+job is terminal. Poll it *without* the flag until it reports a terminal state,
+then make the flagged call:
+
+1. `get_export_status(job_id=…)` — repeat until it reports a terminal state.
+2. `get_export_status(job_id=…, verify_output=True)` — one call, once terminal.
+
+Asking on every poll turns the first one into an error and you never see
+progress.
 
 The receipt is bound to the artifact: when the result carries an
-`output_path`, the receipt's `path` must describe that same file (compared
-case- and separator-insensitively), so a stale probe from an earlier render —
-or the previous item in a batch — cannot stand in for this one.
+`output_path`, the receipt's `path` must describe that same file (folded
+case- and separator-insensitively, in a platform-independent way), so a stale
+probe from an earlier render — or the previous item in a batch — cannot stand
+in for this one. A result with no `output_path` skips the comparison rather
+than guessing one; one whose `output_path` is not a usable path is an error,
+not a skipped check.
 
 ```json
 "verification": {
@@ -114,7 +127,7 @@ evidence left. See the submit/completion contract in
 - The artifact is probed independently with `ffprobe` (duration, streams,
   dimensions). ffprobe is an external dependency and is not bundled.
 - Duration and dimensions match the project settings and the export arguments.
-- When `verify_output: true` was passed, `verification.output` also carries `exists: true`, a non-zero `size_bytes`, `duration_sec` for timed media, a non-empty `streams` list, and a `path` matching the `output_path` this call produced.
+- When `verify_output: true` was passed, `verification.output` also carries `exists: true`, a non-zero `size_bytes`, `duration_sec` for timed media, and a non-empty `streams` list — and, **when this call's result also carries an `output_path`**, a `path` naming that same file. A result with no `output_path` (the usual case for `get_export_status`) skips that last comparison rather than guessing a path; one that carries an `output_path` which is not a usable path is an error, not a skipped check.
 - Audio presence matches the requested `audio` flag, and the whole mix is
   checked, not a soloed track.
 - `export_thumbnail` produced an image at the requested time in the requested

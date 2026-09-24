@@ -128,8 +128,13 @@ wants proof about the artifact asks for it: pass `verify_output: true` to
 **The asynchronous submits do not take the flag.** `export_video` and
 `build_vlog_demo` return a job acknowledgement and the artifact does not exist
 when they return, so a receipt cannot be demanded of them — doing so would cost
-the caller the `job_id` it needs to poll. Read a video export out with
-`get_export_status(verify_output: true)` once the job reaches a terminal state.
+the caller the `job_id` it needs to poll.
+
+**Poll first, then ask for the receipt.** A running job has no artifact to
+probe, so `get_export_status(verify_output: true)` fails closed until the job
+is terminal. Poll it without the flag until it reports a terminal state, then
+make one flagged call. Asking on every poll means the first one errors out and
+progress is never seen.
 
 The flag is strictly opt-in and defaults to `false`, so a caller that never
 passes it keeps exactly the contract it has today. When it is passed, the host
@@ -150,6 +155,12 @@ Two rules apply to every opted-in call, including the read-only one:
   earlier render, or the previous item in a batch, cannot stand in. The fold is
   platform-independent: it does not use `os.path`, which would make the same
   two spellings compare equal on Windows and unequal on a Linux runner.
+
+  Absent and unusable are not the same case. A result with no `output_path` —
+  the usual case for `get_export_status` — skips the comparison, because
+  guessing a path is worse than not checking. A result that carries one and it
+  is not a usable path (wrong type, or empty) is a broken host and is rejected:
+  a fail-closed module must not silently switch its own check off.
 
 The adapter never synthesises a receipt and never probes the file itself:
 duration and stream facts come from a probe the **host** runs (`ffprobe` or an

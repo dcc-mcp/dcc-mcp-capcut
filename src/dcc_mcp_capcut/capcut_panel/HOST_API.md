@@ -135,7 +135,12 @@ Four rules catch the mistakes that make a receipt worthless:
   render, or the previous item in a batch, is rejected — which is the point,
   because every other field check would pass on it. Separator style,
   drive-letter case and relative paths are normalised away first, so an honest
-  host is not rejected over spelling.
+  host is not rejected over spelling. Returning no `output_path` skips the
+  comparison; returning one that is not a usable path is an error, not a
+  skipped check.
+- Do not report a receipt for a job that is still running. There is no artifact
+  to probe yet, so the call fails closed. Callers poll without `verify_output`
+  until the job is terminal and then ask once.
 - Match the picture to the action. `export_thumbnail` renders a still: one
   `image` stream, no `video` or `audio` stream, no `duration_sec`.
   `get_export_status` may report either a `video` or an `image` stream, because

@@ -353,11 +353,42 @@ def test_path_binding_is_skipped_when_the_result_carries_no_output_path():
     )
 
 
-def test_path_binding_ignores_a_non_string_output_path():
-    result = video_result(output_path=42)
+@pytest.mark.parametrize("bad", [42, "", "   ", ["C:/out/vlog.mp4"], {"path": "C:/out/vlog.mp4"}])
+def test_a_present_but_unusable_output_path_is_rejected(bad):
+    # Regression: a non-string output_path used to skip the bind entirely, so a
+    # broken host silently turned the check off. Absent is skippable; present
+    # and unusable is not.
+    result = video_result(output_path=bad)
+
+    with pytest.raises(RuntimeError, match="cannot be bound"):
+        validate_host_result("get_export_status", result, params={"verify_output": True})
+
+
+def test_a_running_job_cannot_yield_a_receipt():
+    # Regression: the docs told callers to poll with verify_output, which turns
+    # the very first poll into an error and hides progress. Failing closed here
+    # is correct -- there is no artifact yet -- so the guidance is to poll
+    # unflagged until terminal and then ask once.
+    running = {"state": "running", "progress": 0.42}
+
+    assert validate_host_result("get_export_status", running) is running
+    with pytest.raises(RuntimeError, match="cannot report an export receipt without"):
+        validate_host_result("get_export_status", running, params={"verify_output": True})
+
+
+def test_an_absent_output_path_skips_the_bind():
+    # get_export_status usually has none, and guessing one is worse than
+    # not checking.
+    result = {"state": "done", "verification": {"ok": True, "output": copy.deepcopy(VIDEO_RECEIPT)}}
 
     assert (
         validate_host_result("get_export_status", result, params={"verify_output": True}) is result
+    )
+    assert (
+        validate_host_result(
+            "get_export_status", video_result(output_path=None), params={"verify_output": True}
+        )
+        is not None
     )
 
 

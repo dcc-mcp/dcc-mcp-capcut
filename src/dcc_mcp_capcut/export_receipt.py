@@ -200,12 +200,22 @@ def _validate_expected_path(path: str, expected_path: Any, action: str, where: s
 
     Without this the receipt only proves *some* file exists: a host could hand
     back a stale probe from an earlier render, or the previous item in a batch,
-    and every field check would pass. The comparison is skipped when the result
-    carries no ``output_path`` to compare against -- ``get_export_status``
-    usually does not, and guessing one would be worse than not checking.
+    and every field check would pass.
+
+    Absent and unusable are deliberately not the same case. A result that
+    carries no ``output_path`` at all -- ``get_export_status`` usually does
+    not -- skips the check, because guessing one would be worse than not
+    checking. A result that carries one and it is not a usable path is a broken
+    host, and in a fail-closed module that has to be an error rather than a
+    silently disabled check.
     """
-    if not isinstance(expected_path, str) or not expected_path.strip():
+    if expected_path is None:
         return
+    if not isinstance(expected_path, str) or not expected_path.strip():
+        raise RuntimeError(
+            f"{where} cannot be bound: {action} returned output_path {expected_path!r}, "
+            "which is not a usable path"
+        )
     if _normalize_path(path) != _normalize_path(expected_path):
         raise RuntimeError(
             f"{where} describes {path!r}, but {action} was asked to produce {expected_path!r}"

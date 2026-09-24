@@ -59,7 +59,20 @@ the `capcut-*` skill directories and deliberately outside the lint glob:
 - `host-boundary.md` — the external-bridge boundary, consent rules, bridge contract.
 - `dependencies-and-notices.md` — third-party licenses and the "having this skill grants no rights" statement.
 - `export-and-verification.md` — the post-operation readback contract and export acceptance.
+- `upstream-handoff.md` — the delivery format for a system that generates upstream of this adapter.
 - `troubleshooting.md` — symptom to cause to remediation, starting with `dcc-mcp-capcut-doctor`.
+
+## Upstream handoff
+
+Every `capcut-*` skill also carries `agents/openai.yaml`: the `interface`
+descriptor an agent UI reads for a display name, a one-line summary, and a
+default prompt. It is a presentation surface, not a contract — the capability
+statement stays in each `SKILL.md`.
+
+A system that produces material upstream of this adapter delivers two documents
+plus a media directory: an asset manifest (paths plus attribution) and the
+canonical edit plan. See `references/upstream-handoff.md` and run
+`python demo/upstream_handoff.py` for a worked example.
 
 ## Before using any skill
 

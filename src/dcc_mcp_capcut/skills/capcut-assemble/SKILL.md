@@ -112,6 +112,7 @@ error that triggers the fallback; everything else is a real failure.
 ## References
 
 - [host boundary](../references/host-boundary.md)
+- [upstream handoff](../references/upstream-handoff.md)
 - [export and verification](../references/export-and-verification.md)
 - [dependencies and notices](../references/dependencies-and-notices.md)
 - [troubleshooting](../references/troubleshooting.md)

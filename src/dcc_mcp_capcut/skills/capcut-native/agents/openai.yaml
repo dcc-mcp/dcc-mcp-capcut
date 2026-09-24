@@ -1,0 +1,15 @@
+# Interface descriptor for CapCut Native Probe
+#
+# Consumed by agent UIs that read the `interface` block: a human display name,
+# a one-line summary, and the default prompt to start a session from.
+#
+# This file is deliberately not a second source of truth. The skill name and the
+# capability statement belong to the `SKILL.md` frontmatter, and
+# `tests/test_interface_descriptors.py` fails when this file stops agreeing with
+# it. Keep `short_description` at or under 64 characters and draw its wording
+# from the frontmatter `description`.
+
+interface:
+  display_name: "CapCut Native Probe"
+  short_description: "Inspect a Qt probe without claiming editing support."
+  default_prompt: "Inspect the connected Qt probe and report the metadata the host exposes. Treat the result as diagnostics only; do not edit anything with it."

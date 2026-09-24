@@ -10,5 +10,8 @@ build/
 .media/
 demo/assets/
 demo/output/
+# Placeholder media materialised by demo/upstream_handoff.py; only the two
+# handoff documents and the real subtitle file are checked in.
+demo/upstream-delivery/assets/
 screenshot.png
 *.log

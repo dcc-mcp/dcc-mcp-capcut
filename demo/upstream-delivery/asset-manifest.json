@@ -1,0 +1,40 @@
+{
+  "schema": "dcc-mcp-capcut/asset-manifest/v1",
+  "generated_by": "example upstream generator",
+  "generated_at": "2026-09-24T00:00:00Z",
+  "delivery_root": ".",
+  "assets": [
+    {
+      "id": "earthrise",
+      "path": "assets/earthrise.mp4",
+      "kind": "video",
+      "license": "NASA public domain",
+      "attribution": "NASA/Goddard Space Flight Center Scientific Visualization Studio",
+      "source": "https://svs.gsfc.nasa.gov/4593/"
+    },
+    {
+      "id": "oahu_flyover",
+      "path": "assets/oahu_flyover.mp4",
+      "kind": "video",
+      "license": "NASA/JPL public domain",
+      "attribution": "NASA/JPL Photojournal animation PIA14898",
+      "source": "https://photojournal.jpl.nasa.gov/animation/PIA14898"
+    },
+    {
+      "id": "free_music",
+      "path": "assets/free_ambient.wav",
+      "kind": "audio",
+      "license": "Original audio generated locally with FFmpeg sine sources",
+      "attribution": null,
+      "source": null
+    },
+    {
+      "id": "captions_zh",
+      "path": "captions/galaxy_zh.srt",
+      "kind": "subtitle",
+      "license": "Derived from the narration script",
+      "attribution": null,
+      "source": null
+    }
+  ]
+}

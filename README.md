@@ -180,6 +180,41 @@ optional feature disabled), `fail` (the adapter cannot start in this state), or
 failed and `1` when at least one check failed. The doctor never installs,
 writes, or mutates anything.
 
+## Release gates
+
+Release Please cuts the release: it opens a release PR against `main`, and
+merging it creates the tag, the GitHub release, and the artifacts. Two gates
+stand between a drifted tree and a published artifact.
+
+**One version per release.** The wheel and sdist take their version from
+`pyproject.toml` while the panel archive takes the one `release.yml` derives
+from the tag, so a tree that lagged behind its own tag used to publish a single
+release mixing `dcc_mcp_capcut-0.1.0-*.whl` with
+`dcc-mcp-capcut-0.2.0-panel.zip`. `tools/check_release_version.py` reads the
+version back out of `pyproject.toml`, `src/dcc_mcp_capcut/__version__.py`, the
+wheel, the sdist and the panel archive, and fails unless every one of them
+declares the version the release tag names:
+
+```bash
+python tools/check_release_version.py                      # do the sources agree?
+python tools/check_release_version.py --print-version      # the in-tree version
+python tools/check_release_version.py --expect 0.3.0 --dist dist
+```
+
+It runs on every PR that builds artifacts, and twice in `release.yml` — once
+against the tree before anything is built, and once against `dist/` before
+anything is uploaded. A file it cannot read a version from is a failure, not a
+skip.
+
+**A green release PR.** A PR opened with the default `GITHUB_TOKEN` triggers no
+workflows, so its runs sit at `action_required` with zero jobs and never turn
+green. `release-please.yml` therefore prefers `secrets.RELEASE_PLEASE_TOKEN` — a
+PAT makes the release PR an ordinary PR whose checks run on their own — and
+falls back to `GITHUB_TOKEN` until that secret exists. With the fallback in
+place, approve the release PR's runs by hand on the Actions page before
+merging; the version gate in `release.yml` runs regardless, because it is
+triggered by the push to `main`.
+
 ## Runtime boundary
 
 The adapter is an external-bridge (`instance_type=gui`) service. It does not

@@ -76,10 +76,27 @@ jobs:
           python -m pip install --disable-pip-version-check build twine
           python -m build
           python -m twine check dist/*
+      - name: Read the version the sources declare
+        id: version
+        # The panel version used to be the literal 0.1.0, which both pinned the
+        # artifact to a version the tree had left behind and hid the drift.
+        run: echo "version=$(python tools/check_release_version.py --print-version)" >> "$GITHUB_OUTPUT"
       - name: Build deterministic panel artifact
-        run: python tools/build_panel_archive.py --version 0.1.0 --output dist/dcc-mcp-capcut-0.1.0-panel.zip
+        run: |
+          python tools/build_panel_archive.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --output "dist/dcc-mcp-capcut-${{ steps.version.outputs.version }}-panel.zip"
       - name: Verify the panel artifact against its manifest
-        run: python tools/build_panel_archive.py --verify dist/dcc-mcp-capcut-0.1.0-panel.zip
+        run: |
+          python tools/build_panel_archive.py \
+            --verify "dist/dcc-mcp-capcut-${{ steps.version.outputs.version }}-panel.zip"
+      - name: Check every artifact declares one version
+        # Cheap insurance on every PR: a drift between the wheel and the panel
+        # archive is caught here rather than at release time.
+        run: |
+          python tools/check_release_version.py \
+            --expect "${{ steps.version.outputs.version }}" \
+            --dist dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-candidate

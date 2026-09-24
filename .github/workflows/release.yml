@@ -45,6 +45,12 @@ jobs:
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
+      - name: Check the tree agrees with the release tag
+        shell: bash
+        # The wheel takes its version from pyproject.toml and the panel archive
+        # from the tag, so nothing compared the two chains. Fail here, before
+        # anything is built, when the tree never followed the tag.
+        run: python tools/check_release_version.py --expect "${RELEASE_TAG#v}"
       - name: Build release artifacts
         shell: bash
         run: |
@@ -57,7 +63,14 @@ jobs:
             --output "dist/dcc-mcp-capcut-${version}-panel.zip"
           python tools/build_panel_archive.py \
             --verify "dist/dcc-mcp-capcut-${version}-panel.zip"
-          find dist -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+      - name: Check every artifact declares the release version
+        shell: bash
+        # Judge what was built, not what the tree claims: read the version back
+        # out of each artifact, and upload nothing unless they all agree.
+        run: python tools/check_release_version.py --expect "${RELEASE_TAG#v}" --dist dist
+      - name: Checksum the artifacts
+        shell: bash
+        run: find dist -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
       - name: Attach artifacts to Release Please release
         shell: bash
         run: |

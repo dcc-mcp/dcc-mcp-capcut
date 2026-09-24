@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from importlib.resources import files
 from pathlib import Path
 
@@ -89,10 +90,31 @@ def plan_referencing(*media: str) -> dict:
     }
 
 
-def delivery_copy(tmp_path: Path) -> Path:
-    """A scratch copy of the worked example, so a run never writes into the repo."""
+def _symlinks_supported() -> bool:
+    """Probe once whether this platform/process may create symlinks."""
+    with tempfile.TemporaryDirectory() as probe:
+        target = Path(probe) / "target"
+        target.mkdir()
+        try:
+            (Path(probe) / "link").symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return False
+        return True
+
+
+def delivery_copy(tmp_path: Path, *, with_media: bool = False) -> Path:
+    """A scratch copy of the worked example, so a run never writes into the repo.
+
+    ``assets/`` is dropped unless asked for. A previous run may have left
+    placeholder media there (it is gitignored but present on disk), and tests
+    that assert on placeholder behaviour must not inherit that state.
+    """
     delivery = tmp_path / "delivery"
-    shutil.copytree(EXAMPLE, delivery)
+    shutil.copytree(EXAMPLE, delivery, ignore=shutil.ignore_patterns("assets"))
+    if with_media:
+        (delivery / "assets").mkdir()
+        for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+            (delivery / "assets" / name).write_bytes(b"x")
     return delivery
 
 
@@ -198,6 +220,143 @@ def test_materialize_never_writes_outside_the_delivery_root(tmp_path):
         upstream_handoff.run(delivery)
     assert not list(tmp_path.glob("outside")), "materialize() wrote outside the delivery root"
     assert not list(tmp_path.rglob("escaped.txt"))
+
+
+def test_duplicate_asset_ids_are_rejected():
+    """An id collision makes a manifest ambiguous for a consumer resolving by id."""
+    manifest = manifest_declaring(asset("same", "assets/a.mp4"), asset("same", "assets/b.mp4"))
+    with pytest.raises(upstream_handoff.HandoffError, match="repeats the id"):
+        upstream_handoff.declared_paths(manifest)
+
+
+@pytest.mark.skipif(
+    not _symlinks_supported(),
+    reason="symlinks need developer mode or elevated privileges on this platform",
+)
+def test_a_symlinked_ancestor_cannot_redirect_a_write_outside_the_root(tmp_path):
+    """Containment has to hold at the filesystem level, not only lexically.
+
+    ``assets/escaped.txt`` is lexically inside the root, so every textual check
+    passes -- but if ``assets`` is a symlink to a directory outside the root,
+    the write lands there instead. resolve_referenced_files() resolves before
+    checking containment, which is what closes this.
+    """
+    delivery = tmp_path / "delivery"
+    (delivery / "assets").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (delivery / "link").symlink_to(outside, target_is_directory=True)
+
+    manifest = manifest_declaring(asset("x", "link/escaped.txt"))
+    upstream_handoff.declared_paths(manifest)  # lexical check passes -- the point
+    with pytest.raises(
+        (upstream_handoff.HandoffError, ValueError), match="outside the delivery root"
+    ):
+        upstream_handoff.materialize(manifest, delivery)
+    assert not (outside / "escaped.txt").exists(), "the write escaped the delivery root"
+
+
+def test_reconcile_rejects_a_declared_file_that_was_never_delivered_even_if_unused(tmp_path):
+    """Existence is checked over every declared path, not just referenced ones.
+
+    A declared file that never arrived is a broken delivery. Reporting it as
+    merely "unused" would let --no-materialize exit 0 on it.
+    """
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "a.mp4").write_bytes(b"")
+    # 'a' is delivered and referenced; 'spare' is declared but never arrived.
+    with pytest.raises(upstream_handoff.HandoffError, match="every declared file"):
+        upstream_handoff.reconcile(
+            manifest_declaring(
+                asset("a", "assets/a.mp4"), asset("spare", "assets/spare.png", kind="image")
+            ),
+            plan_referencing("assets/a.mp4"),
+            tmp_path,
+        )
+
+
+@pytest.mark.parametrize("bad_root", [None, "somewhere/", "./", "assets"])
+def test_delivery_root_must_be_the_manifest_directory(tmp_path, bad_root):
+    """delivery_root is required and read, not merely documented.
+
+    Only "." is supported: --media-dir is the delivery root, and honouring a
+    second authority for the same paths would mean two answers to "where is
+    this file". Anything else is rejected rather than silently ignored.
+    """
+    delivery = tmp_path / "delivery"
+    delivery.mkdir()
+    manifest = manifest_declaring(asset("a", "assets/a.mp4"))
+    if bad_root is None:
+        manifest.pop("delivery_root")
+    else:
+        manifest["delivery_root"] = bad_root
+    (delivery / "asset-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (delivery / "edit-plan.json").write_text(
+        json.dumps(plan_referencing("assets/a.mp4")), encoding="utf-8"
+    )
+    with pytest.raises(upstream_handoff.HandoffError, match="delivery_root"):
+        upstream_handoff.run(delivery)
+
+
+def test_dispatch_refuses_to_run_against_placeholder_media(tmp_path, monkeypatch):
+    """Zero-byte placeholders satisfy every existence check but are not footage.
+
+    Assembling them would mutate a real project with fabricated media. The
+    bridge must not be reached at all.
+    """
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        upstream_handoff, "_call_bridge", lambda action, params: calls.append((action, params))
+    )
+    delivery = delivery_copy(tmp_path)
+    with pytest.raises(upstream_handoff.HandoffError, match="placeholder media"):
+        upstream_handoff.run(delivery, dispatch=True)
+    assert calls == [], "dispatch reached the bridge despite placeholder media"
+
+
+def test_dispatch_payload_carries_media_dir_and_export(tmp_path, monkeypatch):
+    """apply_edit_plan requires media_dir whenever dry_run is false.
+
+    Omitting it made stage 6 fail with `media_dir is required unless dry_run is
+    true` while the stage table still advertised it as working. This asserts the
+    payload shape, with the bridge stubbed so no host is needed.
+    """
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        upstream_handoff,
+        "_call_bridge",
+        lambda action, params: calls.append((action, params)) or {"ok": True},
+    )
+    delivery = delivery_copy(tmp_path, with_media=True)
+
+    verdict = upstream_handoff.run(delivery, dispatch=True, export=True)
+    assert verdict["stage"] == "complete"
+
+    assert len(calls) == 1
+    action, params = calls[0]
+    assert action == "apply_edit_plan"
+    assert sorted(params) == ["export", "media_dir", "plan", "strategy"]
+    assert params["media_dir"] == str(delivery)
+    assert params["export"] is True
+    assert params["strategy"] == "auto"
+
+
+def test_a_delivery_with_no_subtitles_completes_the_host_free_stages(tmp_path):
+    """compile_plan always emits `subtitles`, and an empty one is rejected on re-entry.
+
+    A delivery that legitimately carries no subtitle files used to crash at the
+    OTIO round trip and again at the action script, because normalize_plan()
+    insists the field be omitted rather than empty.
+    """
+    delivery = delivery_copy(tmp_path)
+    plan = json.loads((delivery / "edit-plan.json").read_text(encoding="utf-8"))
+    plan.pop("subtitles", None)
+    (delivery / "edit-plan.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    verdict = upstream_handoff.run(delivery)
+    assert verdict["stage"] == "host-free complete"
+    assert verdict["plan"]["subtitle_count"] == 0
+    assert verdict["action_script"]["step_count"] > 0
 
 
 def test_reconcile_rejects_a_plan_referencing_an_undeclared_path(tmp_path):

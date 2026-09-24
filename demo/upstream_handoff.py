@@ -59,6 +59,18 @@ MANIFEST_SCHEMA = "dcc-mcp-capcut/asset-manifest/v1"
 PLAN_SCHEMA = "dcc-mcp-capcut/edit-plan/v1"
 
 
+def _call_bridge(action: str, params: dict) -> dict:
+    """The one hop that reaches the host, isolated so a test can stub it.
+
+    Importing inside the function is deliberate: it keeps the four host-free
+    stages importable on a machine with no bridge configured, which is what
+    lets the example run in CI.
+    """
+    from dcc_mcp_capcut.bridge import call_bridge
+
+    return call_bridge(action, params)
+
+
 class HandoffError(RuntimeError):
     """The delivery does not satisfy the handoff contract."""
 
@@ -77,6 +89,22 @@ def load_delivery(media_dir: Path) -> tuple[dict, dict]:
         raise HandoffError(
             f"asset-manifest.json declares schema {schema!r}; expected {MANIFEST_SCHEMA!r}"
         )
+
+    # delivery_root is required by the contract and was previously documented
+    # but never read, so a manifest could declare a root it did not mean and
+    # nothing would notice. Only "." -- the manifest's own directory -- is
+    # supported: this tool resolves every path against the directory it was
+    # pointed at, and honouring a different root would mean two authorities
+    # for the same paths. Reject anything else rather than ignore it.
+    root = manifest.get("delivery_root")
+    if root is None:
+        raise HandoffError("asset-manifest.json is missing required field 'delivery_root'")
+    if root != ".":
+        raise HandoffError(
+            f"asset-manifest.json declares delivery_root {root!r}; only '.' is supported "
+            "-- --media-dir is the delivery root, and every path is resolved against it"
+        )
+
     return manifest, plan
 
 
@@ -84,7 +112,8 @@ def declared_paths(manifest: dict) -> list[str]:
     assets = manifest.get("assets")
     if not isinstance(assets, list) or not assets:
         raise HandoffError("asset-manifest.json carries no assets")
-    seen: set[str] = set()
+    seen_paths: set[str] = set()
+    seen_ids: set[str] = set()
     paths: list[str] = []
     for index, asset in enumerate(assets):
         if not isinstance(asset, dict):
@@ -106,9 +135,16 @@ def declared_paths(manifest: dict) -> list[str]:
                 f"assets[{index}] declares a non-portable path {asset['path']!r}: {exc}"
             ) from exc
 
-        if path in seen:
+        # Both identifiers are uniqueness-checked, not just the path. A
+        # repeated id makes a manifest ambiguous to a consumer that resolves
+        # assets by id, which is exactly the lookup the manifest exists for.
+        if asset["id"] in seen_ids:
+            raise HandoffError(f"assets[{index}] repeats the id {asset['id']!r}")
+        seen_ids.add(asset["id"])
+
+        if path in seen_paths:
             raise HandoffError(f"assets[{index}] repeats the path {path!r}")
-        seen.add(path)
+        seen_paths.add(path)
         paths.append(path)
     return paths
 
@@ -134,9 +170,19 @@ def materialize(manifest: dict, media_dir: Path) -> list[str]:
     compiles, not that pixels decode. Placeholders make the example runnable
     with no network and no footage. Real deliveries skip this entirely.
     """
+    # Resolve through the adapter's own primitive rather than joining the path
+    # by hand. `media_dir / path` is lexically inside the root, so it passes
+    # every textual check while still writing elsewhere when an ancestor is a
+    # symlink: `delivery/assets -> /elsewhere` turns `assets/x.mp4` into a
+    # write outside the delivery. resolve_referenced_files() resolves first and
+    # then checks containment, which is what makes "inside the root" true at
+    # the filesystem level instead of only on paper.
+    root = media_dir.resolve()
+    resolved = _resolve_referenced_files(root, [asset["path"] for asset in manifest["assets"]])
+
     created: list[str] = []
     for asset in manifest["assets"]:
-        target = media_dir / asset["path"]
+        target = resolved[asset["path"]]
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"")
@@ -151,6 +197,11 @@ def reconcile(manifest: dict, plan: dict, media_dir: Path) -> dict:
     the plan uses but the manifest never declared is a different mistake from a
     declared file that was never delivered, and both differ from a delivered
     file nothing references.
+
+    "Present" is checked over every **declared** path, not only the referenced
+    ones: the handoff contract requires each listed file to exist, and a
+    declared-but-unreferenced file that never arrived is a broken delivery,
+    not merely an unused one.
     """
     declared = declared_paths(manifest)
     referenced = referenced_paths(plan)
@@ -161,12 +212,25 @@ def reconcile(manifest: dict, plan: dict, media_dir: Path) -> dict:
             "the plan references paths the manifest does not declare: " + ", ".join(undeclared)
         )
 
-    resolved = _resolve_referenced_files(media_dir.resolve(), referenced)
+    root = media_dir.resolve()
+    resolved = _resolve_referenced_files(root, referenced)
     missing = [path for path in referenced if not resolved[path].is_file()]
     if missing:
         raise HandoffError(
             f"the delivery root {media_dir} does not contain every referenced file: "
             + ", ".join(missing)
+        )
+
+    # Every declared file must exist too, not only the ones the plan happens to
+    # reference. The contract requires each listed file to be present, so a
+    # declared file that never arrived is a broken delivery rather than an
+    # "unused" one -- otherwise --no-materialize would exit 0 on it.
+    declared_resolved = _resolve_referenced_files(root, declared)
+    undelivered = [path for path in declared if not declared_resolved[path].is_file()]
+    if undelivered:
+        raise HandoffError(
+            f"the delivery root {media_dir} does not contain every declared file: "
+            + ", ".join(undelivered)
         )
 
     unused = [path for path in declared if path not in referenced]
@@ -241,6 +305,15 @@ def run(
     compiled = compile_plan(plan)
     if compiled["schema"] != PLAN_SCHEMA:
         raise HandoffError(f"the plan compiled to {compiled['schema']!r}, not {PLAN_SCHEMA!r}")
+
+    # compile_plan() always emits a `subtitles` key, and an *empty* one is not
+    # accepted back by normalize_plan() -- it insists the field be omitted
+    # rather than empty. Every downstream consumer (plan_to_edl, plan_to_actions)
+    # normalizes again, so a delivery with no subtitle files would crash there
+    # on exactly the deliveries that legitimately carry none. Drop the empty
+    # key once, here, and hand the same document to every later stage.
+    if not compiled.get("subtitles"):
+        compiled.pop("subtitles", None)
     verdict["plan"] = {
         "name": compiled["name"],
         "fps": compiled["fps"],
@@ -248,7 +321,7 @@ def run(
         "duration_frames": compiled["duration_frames"],
         "clip_count": sum(len(track["clips"]) for track in compiled["tracks"]),
         "caption_count": len(compiled["captions"]),
-        "subtitle_count": len(compiled["subtitles"]),
+        "subtitle_count": len(compiled.get("subtitles") or []),
     }
     verdict["stage"] = "otio"
 
@@ -265,9 +338,33 @@ def run(
 
     if dispatch:
         verdict["stage"] = "dispatch"
-        from dcc_mcp_capcut.bridge import call_bridge
 
-        result = call_bridge("apply_edit_plan", {"plan": compiled, "strategy": "auto"})
+        # Placeholders are zero bytes: they satisfy every existence check but
+        # are not footage. Assembling them would mutate a real CapCut project
+        # with fabricated media, so refuse rather than produce a project that
+        # looks assembled and is empty. Fetch real media, or pass
+        # --no-materialize so the missing files are reported instead.
+        if verdict.get("placeholders_created"):
+            raise HandoffError(
+                "refusing to dispatch: this run created placeholder media for "
+                + ", ".join(verdict["placeholders_created"])
+                + ". Supply real media (or re-run with --no-materialize so the "
+                "missing files are reported) before touching a live project."
+            )
+
+        # apply_edit_plan requires media_dir whenever dry_run is false: the
+        # plan stores portable relative paths and they have to resolve to real
+        # files before any host mutation. Omitting it makes the host action
+        # fail with `media_dir is required unless dry_run is true`.
+        result = _call_bridge(
+            "apply_edit_plan",
+            {
+                "plan": compiled,
+                "media_dir": str(media_dir),
+                "strategy": "auto",
+                "export": export,
+            },
+        )
         verdict["dispatch"] = result
         verdict["stage"] = "complete"
     else:

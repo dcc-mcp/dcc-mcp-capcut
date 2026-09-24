@@ -47,8 +47,17 @@ as missing instead, which is what you want when validating a real delivery:
 python demo/upstream_handoff.py --no-materialize
 ```
 
-For a renderable run, fetch real footage into `demo/assets/` and point the plan
-at it, or pass `--media-dir` at a delivery that already has real media.
+For a renderable run, fetch real footage into `demo/upstream-delivery/assets/`
+— the plan's paths are relative to the delivery root, so `demo/assets/` is the
+wrong directory (it is also gitignored). Then dispatch:
+
+```powershell
+python demo/upstream_handoff.py --no-materialize   # prove every file is real
+python demo/upstream_handoff.py --dispatch         # stage 6, needs a bound host
+```
+
+`--dispatch` refuses to run while placeholders exist, so a run that materialised
+placeholder media cannot mutate a real project with empty files.
 
 ## Platform differences
 

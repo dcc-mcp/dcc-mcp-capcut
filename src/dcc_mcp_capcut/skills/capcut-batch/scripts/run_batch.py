@@ -196,6 +196,9 @@ def _settle_orphaned_jobs(
     * ``done`` — it finished after all; settle it from that job.
     * any other terminal state — the job is over, so a re-export is safe.
     * still running — the batch cannot continue, and says which job holds it.
+    * no ``state`` at all — the host cannot describe the job, so it is refused
+      like a finished one: an unreadable status is not proof the window is
+      busy, and treating it as such would end the batch over one item.
     * submitted but unnamed — an export went out and no ``job_id`` came back,
       so there is nothing to ask the host about and the item is refused.
 
@@ -246,8 +249,12 @@ def _settle_orphaned_jobs(
                     "is still rendering. Check the destination and the CapCut window, "
                     "then resume with force_rerender=true to render this item again."
                 )
-            status = dispatch("get_export_status", {"job_id": job_id})
-            state = status.get("state")
+            # Read through the same helper the forced path and the polling
+            # loop use, so one host response means one thing everywhere: a
+            # status the host cannot describe is this item's failure, not a
+            # reason to abandon the whole resume over a window nothing proved
+            # is busy.
+            state = _job_state(job_id, index, item)
             if state == SUCCESS_EXPORT_STATE:
                 receipt = _read_receipt(
                     job_id, output_path=item["output_path"], verify_output=verify_output
@@ -260,6 +267,13 @@ def _settle_orphaned_jobs(
                     receipt=receipt,
                 )
                 continue
+        except HostStillRunning:
+            # The one failure isolation cannot absorb: that job is holding the
+            # only bound window, so the batch stops rather than dispatch into
+            # it. Re-raised ahead of the handler below because
+            # ``HostStillRunning`` is a ``RuntimeError``, and swallowing it
+            # would send the next item's export into a rendering host.
+            raise
         except (RuntimeError, OSError, ValueError) as error:
             # Settle it as this item's failure and keep going, holding on to the
             # handle it was left with. That is what makes the next resume ask
@@ -270,16 +284,10 @@ def _settle_orphaned_jobs(
             # to pay for a new one.
             fail_item(manifest, index, error)
             continue
-        if state in TERMINAL_EXPORT_STATES:
-            # The job ended without a deliverable, so the destination is free.
-            remaining.append(index)
-            continue
-        raise HostStillRunning(
-            f"item {index} still has export job {job_id!r} in state {state!r}; the host "
-            f"is rendering it and the batch cannot start another export to "
-            f"{item['output_path']!r}. Read it with get_export_status, or "
-            "cancel_export it, before resuming."
-        )
+        # ``_job_state`` returns only terminal states, and a successful one was
+        # settled above: what is left is a job that ended without a
+        # deliverable, so the destination is free.
+        remaining.append(index)
     return remaining
 
 

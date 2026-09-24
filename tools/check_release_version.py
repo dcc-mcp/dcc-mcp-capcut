@@ -19,9 +19,9 @@ built rather than what the tree claims:
 
 Without ``--expect`` the inputs are only required to agree with each other;
 with it, every input must declare that exact version. A non-zero exit is the
-signal, and every problem is also emitted as a GitHub error annotation when
-``$GITHUB_ACTIONS`` is set, so a failed gate is readable on the run page and not
-only in the step log.
+signal. Problems are always written to stderr, and additionally emitted as a
+GitHub error annotation when ``$GITHUB_ACTIONS`` is set, so a failed gate is
+readable on the run page and ``--print-version`` keeps stdout to itself.
 """
 
 from __future__ import annotations
@@ -345,8 +345,10 @@ def main(argv: list[str] | None = None) -> int:
             print(versions[source])
 
     for problem in problems:
+        # Annotations go to stderr so stdout stays clean for --print-version,
+        # whose output is captured into $GITHUB_OUTPUT by the workflows.
         if os.environ.get("GITHUB_ACTIONS"):
-            print(f"::error::{problem}")
+            print(f"::error::{problem}", file=sys.stderr)
         else:
             print(problem, file=sys.stderr)
     return 1 if problems else 0

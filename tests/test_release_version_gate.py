@@ -314,8 +314,25 @@ def test_main_annotates_problems_on_github_actions(tmp_path, capsys, monkeypatch
         )
         == 1
     )
-    out = capsys.readouterr().out
-    assert out.count("::error::") == 2
+    captured = capsys.readouterr()
+    assert captured.err.count("::error::") == 2
+    # stdout is reserved for --print-version; annotations must not leak into it.
+    assert captured.out == ""
+
+
+def test_github_annotations_never_pollute_print_version(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    pyproject, version_file = write_sources(tmp_path / "tree", VERSION)
+    version_file.write_text(f'__version__ = "{NEWER}"\n')
+    assert (
+        main(
+            ["--print-version", "--pyproject", str(pyproject), "--version-file", str(version_file)]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "::error::" in captured.err
 
 
 def test_print_version_reads_the_source_of_truth(tmp_path, capsys):

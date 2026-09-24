@@ -80,7 +80,12 @@ jobs:
         id: version
         # The panel version used to be the literal 0.1.0, which both pinned the
         # artifact to a version the tree had left behind and hid the drift.
-        run: echo "version=$(python tools/check_release_version.py --print-version)" >> "$GITHUB_OUTPUT"
+        # Assigned on its own line: inside `echo "version=$(cmd)"` a failing cmd
+        # is swallowed by echo's own exit status, which would publish an empty
+        # version instead of failing the job.
+        run: |
+          version="$(python tools/check_release_version.py --print-version)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Build deterministic panel artifact
         run: |
           python tools/build_panel_archive.py \

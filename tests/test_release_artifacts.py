@@ -196,9 +196,11 @@ def test_verify_flags_a_payload_with_no_recorded_digest(tmp_path):
 def test_verify_rejects_duplicate_members(tmp_path):
     """A repeated name is malformed, even when the winning copy is intact.
 
-    Readers resolve a repeated name to the entry written last, so verifying
-    only that copy would leave an archive that checks out here but extracts
-    different bytes for a consumer. Malformed wins over "the last one matches".
+    Readers resolve a repeated name to the entry written last, which is also the
+    copy the verifier reads, so the digests can still agree while one name
+    carries two conflicting bodies. The archive is rejected for being malformed,
+    not because the verified copy is the wrong one -- and that rejection must
+    not swallow the digest mismatch the duplicate also causes.
     """
     archive_path = tmp_path / "panel.zip"
     build(archive_path, SYNTHETIC_VERSION)
@@ -206,15 +208,21 @@ def test_verify_rejects_duplicate_members(tmp_path):
 
     with ZipFile(archive_path) as source:
         members = {name: source.read(name) for name in source.namelist()}
-    with ZipFile(archive_path, "w", ZIP_DEFLATED) as target:
-        for name, data in members.items():
-            target.writestr(name, data)
-        # Append a second copy with different bytes; the manifest digest still
-        # matches whichever copy the reader happens to resolve.
-        target.writestr(member, b"console.log('tampered duplicate')")
+    # Writing a name twice is exactly what this fixture is for, so the duplicate
+    # zipfile warning is expected: catch it rather than leak it into the run.
+    with pytest.warns(UserWarning, match="Duplicate name"):
+        with ZipFile(archive_path, "w", ZIP_DEFLATED) as target:
+            for name, data in members.items():
+                target.writestr(name, data)
+            # Append a second copy with different bytes. Being written last, it
+            # is the copy both a reader and the verifier resolve to, so this
+            # archive is malformed and digest-mismatched at the same time.
+            target.writestr(member, b"console.log('tampered duplicate')")
 
     problems = verify_archive(archive_path)
     assert any("appears more than once" in problem and member in problem for problem in problems)
+    # The duplicate is reported alongside, not instead of, its own mismatch.
+    assert any("digest mismatch" in problem and member in problem for problem in problems)
 
 
 def test_verify_reports_a_missing_manifest(tmp_path):

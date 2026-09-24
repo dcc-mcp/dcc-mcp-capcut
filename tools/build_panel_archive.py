@@ -108,31 +108,39 @@ def verify_archive(path: Path) -> list[str]:
     with ZipFile(path) as archive:
         names = archive.namelist()
         members = set(names)
-        # Readers resolve a repeated name to whichever entry was written last,
-        # so a duplicated member would be verified against one copy while a
-        # consumer silently extracts the other. Treat that as malformed rather
-        # than verifying only the winning copy.
+        problems: list[str] = []
+        # A repeated name makes the archive malformed on its own terms. Readers
+        # resolve it to the entry written last, which is also the copy verified
+        # below, so the digests can still agree while one name carries two
+        # conflicting bodies: "the last copy happens to match" is not a reason
+        # to accept the archive. Accumulate the finding rather than returning,
+        # so a duplicate is reported together with everything else wrong with
+        # the same archive.
         seen: set[str] = set()
         duplicates: set[str] = set()
         for name in names:
             if name in seen:
                 duplicates.add(name)
             seen.add(name)
-        if duplicates:
-            return [f"{name} appears more than once in the archive" for name in sorted(duplicates)]
+        problems.extend(
+            f"{name} appears more than once in the archive" for name in sorted(duplicates)
+        )
         if MANIFEST_NAME not in members:
-            return [f"{MANIFEST_NAME} is missing from the archive"]
+            problems.append(f"{MANIFEST_NAME} is missing from the archive")
+            return problems
         try:
             manifest = json.loads(archive.read(MANIFEST_NAME))
         except (ValueError, UnicodeDecodeError) as error:
-            return [f"{MANIFEST_NAME} is not readable JSON: {error}"]
+            problems.append(f"{MANIFEST_NAME} is not readable JSON: {error}")
+            return problems
         if not isinstance(manifest, dict):
-            return [f"{MANIFEST_NAME} is not a JSON object"]
+            problems.append(f"{MANIFEST_NAME} is not a JSON object")
+            return problems
 
-        problems: list[str] = []
         recorded = manifest.get("files_sha256")
         if not isinstance(recorded, dict) or not recorded:
-            return [f"{MANIFEST_NAME} records no files_sha256 digests"]
+            problems.append(f"{MANIFEST_NAME} records no files_sha256 digests")
+            return problems
 
         for name, digest in sorted(recorded.items()):
             if name not in members:

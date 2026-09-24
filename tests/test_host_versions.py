@@ -301,6 +301,50 @@ def test_check_survives_a_provider_that_reports_no_version_evidence(pin_platform
     assert check.detail["edition"] == "capcut"
 
 
+def test_a_provider_that_omits_the_version_is_probed(pin_platform, monkeypatch):
+    """The extension point: implement ``host_version()``, omit the argument.
+
+    ``version_evidence`` must fall back to ``host_version()`` when no version
+    is passed, and what it returns has to take part in the grading. With a
+    ``None`` default this branch was unreachable, so such a provider reported
+    ``undetermined`` forever and the matrix was inert for it -- which matters
+    because the roadmap adds macOS and 剪映专业版 rows to the matrix.
+    """
+    provider = pin_platform("windows")
+    calls = []
+    monkeypatch.setattr(
+        type(provider), "host_version", lambda _self: calls.append(1) or VERIFIED_BUILD.version
+    )
+
+    evidence = provider.version_evidence("capcut")
+
+    assert len(calls) == 1
+    assert evidence["host_version"] == VERIFIED_BUILD.version
+    assert evidence["version_support"]["status"] == VERIFIED
+    assert evidence["version_support"]["listed"] is True
+
+
+def test_the_probed_version_reaches_the_doctor_verdict(pin_platform, monkeypatch):
+    """End-to-end pin: a provider that only implements ``host_version()`` grades for real."""
+    provider = pin_platform("windows")
+    monkeypatch.setattr(type(provider), "host_version", lambda _self: VERIFIED_BUILD.version)
+    monkeypatch.setattr(
+        type(provider),
+        "detect_installation",
+        lambda _self: {
+            "installed": True,
+            "flavor": "capcut",
+            **_self.version_evidence("capcut"),
+        },
+    )
+
+    check = doctor.check_host_version()
+
+    assert check.status == doctor.OK
+    assert check.detail["host_version"] == VERIFIED_BUILD.version
+    assert check.detail["version_support"]["listed"] is True
+
+
 @pytest.mark.parametrize("version", ["6.9.0", None])
 def test_macos_reads_the_bundle_plist_exactly_once(
     pin_platform, macos_applications, monkeypatch, version

@@ -303,10 +303,27 @@ def test_verify_records_both_token_facts_and_a_default_token_never_vetoes_readin
 def test_verify_is_json_serialisable_with_the_version_matrix_attached(
     pin_platform, monkeypatch, _ready_host
 ):
-    """The doctor serialises this evidence with ``--json``; it must not carry a Path."""
-    pin_platform("windows")
+    """The doctor serialises this evidence with ``--json``; it must not carry a Path.
+
+    The stub carries the provider's real version payload, so the matrix fields
+    this test is named for actually pass through ``verify_installation()``.
+    """
+    provider = pin_platform("windows")
     monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "s" * 43)
-    assert json.loads(json.dumps(verify_installation()))["ready"] is True
+    monkeypatch.setattr(
+        "dcc_mcp_capcut.installer.detect_installation",
+        lambda: {
+            "installed": True,
+            "executable": "CapCut.exe",
+            **provider.version_evidence("capcut"),
+        },
+    )
+
+    payload = verify_installation()
+
+    assert payload["version_support"]["status"] == "undetermined"
+    assert json.loads(json.dumps(payload)) == payload
+    assert json.loads(json.dumps(payload))["ready"] is True
 
 
 # --------------------------------------------------------------------------

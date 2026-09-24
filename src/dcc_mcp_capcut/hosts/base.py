@@ -16,8 +16,10 @@ from .flavors import HostFlavor
 from .versions import DOCTOR_STATUS, UNDETERMINED, UNKNOWN, VERIFIED, version_support
 
 #: Sentinel for "the caller did not read a version", kept distinct from an
-#: explicitly read ``None``. Without it a provider whose discovery read the
-#: plist and found no version would probe the filesystem a second time.
+#: explicitly read ``None``. It has to be the default, not merely a value the
+#: body compares against: with ``None`` as the default a provider that omits
+#: the argument never reaches ``host_version()``, so the extension point is
+#: dead and every such provider reports ``undetermined`` forever.
 _UNREAD: Any = object()
 
 #: One-line summaries for each support-matrix verdict, filled with the edition,
@@ -95,13 +97,17 @@ class HostProvider(ABC):
         """
         return None
 
-    def version_evidence(self, edition: str | None, version: str | None = None) -> dict[str, Any]:
+    def version_evidence(self, edition: str | None, version: Any = _UNREAD) -> dict[str, Any]:
         """Additive version facts every ``detect_installation()`` reports.
 
         Providers merge this into their detection payload so the support-matrix
         verdict travels with the rest of the evidence instead of living only in
-        the doctor. Pass ``version`` when discovery already read it -- including
-        an explicit ``None`` -- so the version is not probed a second time.
+        the doctor.
+
+        Omit ``version`` to have :meth:`host_version` probe it -- that is the
+        extension point a new platform provider implements. Pass it when
+        discovery already read it, including an explicit ``None``, so the
+        version is not probed a second time.
         """
         resolved = self.host_version() if version is _UNREAD else version
         support = version_support(self.name, edition, resolved, platform_supported=self.supported)

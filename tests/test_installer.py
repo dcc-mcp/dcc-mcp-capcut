@@ -122,8 +122,11 @@ def test_verify_probes_health_with_the_default_token_when_unset(pin_platform, mo
     assert result["bridge_reachable"] is True
     assert result["panel_connected"] is False
     assert result["bridge_error"] is None
-    # A default token is not operator configuration, so readiness stays false.
+    # A default token is not operator configuration, but it is also not a
+    # readiness fault: readiness is false here because Linux has no host to
+    # bind, not because the token is weak.
     assert result["bridge_token_configured"] is False
+    assert result["token_is_default"] is True
     assert result["ready"] is False
 
 
@@ -242,6 +245,85 @@ def test_each_flavour_exposes_an_install_command():
         assert flavor.package_id in command
     # The pre-provider name stays available to existing callers.
     assert all(flavor.winget_command() == flavor.install_command() for flavor in HOST_FLAVORS)
+
+
+@pytest.fixture
+def _ready_host(monkeypatch):
+    """A host that is installed, bound and serving a connected panel.
+
+    Every readiness factor except the token is satisfied, so a ``ready``
+    verdict isolates what the token alone does to it.
+    """
+    monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_URL", "http://127.0.0.1:47410")
+    monkeypatch.setenv("DCC_MCP_CAPCUT_PID", "31776")
+    monkeypatch.setenv("DCC_MCP_CAPCUT_WINDOW_HANDLE", "106895862")
+    monkeypatch.setattr(
+        "dcc_mcp_capcut.installer.detect_installation",
+        lambda: {"installed": True, "executable": "CapCut.exe"},
+    )
+    monkeypatch.setattr(
+        "dcc_mcp_capcut.installer.urlopen",
+        lambda *_args, **_kwargs: _Response({"ok": True, "panel_connected": True}),
+    )
+
+
+@pytest.mark.parametrize(
+    "token, configured, default",
+    [
+        # Unset: no operator token, and the default is therefore in force.
+        (None, False, True),
+        (DEFAULT_BRIDGE_TOKEN, True, True),
+        ("s" * 43, True, False),
+    ],
+)
+def test_verify_records_both_token_facts_and_a_default_token_never_vetoes_readiness(
+    pin_platform, monkeypatch, _ready_host, token, configured, default
+):
+    """``token_is_default`` coexists with ``configured`` and never decides ``ready``.
+
+    ``ready`` asks whether the adapter can bind this host and reach the panel
+    on the token actually in force, and the documented default is a token that
+    works. A weak token is a security warning the doctor grades as ``warn``
+    through ``check_bridge_token``; making it fail readiness would overstate
+    that as a wiring fault.
+    """
+    pin_platform("windows")
+    if token is None:
+        monkeypatch.delenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", token)
+
+    result = verify_installation()
+
+    assert result["bridge_token_configured"] is configured
+    assert result["token_is_default"] is default
+    assert result["ready"] is True
+
+
+def test_verify_is_json_serialisable_with_the_version_matrix_attached(
+    pin_platform, monkeypatch, _ready_host
+):
+    """The doctor serialises this evidence with ``--json``; it must not carry a Path.
+
+    The stub carries the provider's real version payload, so the matrix fields
+    this test is named for actually pass through ``verify_installation()``.
+    """
+    provider = pin_platform("windows")
+    monkeypatch.setenv("DCC_MCP_CAPCUT_BRIDGE_TOKEN", "s" * 43)
+    monkeypatch.setattr(
+        "dcc_mcp_capcut.installer.detect_installation",
+        lambda: {
+            "installed": True,
+            "executable": "CapCut.exe",
+            **provider.version_evidence("capcut"),
+        },
+    )
+
+    payload = verify_installation()
+
+    assert payload["version_support"]["status"] == "undetermined"
+    assert json.loads(json.dumps(payload)) == payload
+    assert json.loads(json.dumps(payload))["ready"] is True
 
 
 # --------------------------------------------------------------------------

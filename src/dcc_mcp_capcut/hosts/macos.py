@@ -122,6 +122,16 @@ class MacOSHostProvider(HostProvider):
     def flavors(self) -> tuple[MacOSHostFlavor, ...]:
         return MACOS_FLAVORS
 
+    def host_version(self) -> str | None:
+        """The discovered bundle's ``CFBundleShortVersionString``.
+
+        The plist is the only version evidence macOS exposes, so a bundle whose
+        plist cannot be read grades as ``undetermined`` rather than being
+        reported as a build the matrix lists.
+        """
+        _flavor, _bundle, metadata = self._discover()
+        return metadata.get("bundle_version")
+
     def _candidate_paths(self) -> list[Path]:
         candidates: list[Path] = []
         for flavor in MACOS_FLAVORS:
@@ -142,6 +152,7 @@ class MacOSHostProvider(HostProvider):
         flavor, bundle, metadata = self._discover()
         resolved = flavor or DEFAULT_FLAVOR
         executable = flavor.binary_path(bundle) if flavor and bundle else None
+        version = metadata.get("bundle_version")
         return {
             "installed": bundle is not None,
             # The bundle is the installable unit; ``executable`` is the Mach-O
@@ -157,6 +168,8 @@ class MacOSHostProvider(HostProvider):
             "platform": os.name,
             "provider": self.name,
             "supported": True,
+            # Discovery already read the plist; reuse it instead of probing twice.
+            **self.version_evidence(resolved.name, version),
         }
 
     def installation_plan(self) -> dict[str, Any]:

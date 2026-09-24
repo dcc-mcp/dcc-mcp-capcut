@@ -71,6 +71,8 @@ result.
 | `the bundled panel payload is incomplete` | The wheel was installed without its panel payload. | Reinstall the adapter wheel. |
 | `CapCut bridge did not respond; open the bundled panel` | The broker is up but no panel drained the action within 30 s. | Load the panel in the CapCut extension host, confirm `/health` shows `panel_connected: true`, retry. |
 | `127.0.0.1:<port> is already in use` | Another instance owns the loopback port. | Stop it, or set `DCC_MCP_CAPCUT_BRIDGE_PORT` to a free port and restart. |
+| `<edition> <version> on <platform> is not in the verified host matrix` | The installed build is not one the adapter was acceptance-tested against. | The adapter still binds and starts; run a smoke edit and record the version so it can be added to the matrix. |
+| `the installed <edition> version on <platform> could not be read` | The build is installed but its version is not discoverable on this platform. | Read the version from the CapCut about box and record it; the doctor cannot grade a build it cannot see. |
 
 ## Acceptance
 
@@ -78,12 +80,25 @@ result.
 hold. Do not treat a partial result as readiness:
 
 - `installed` — the CapCut executable or macOS application bundle exists.
-- `bridge_token_configured` — a token is set (use a per-user secret, not the
-  default `dev-token`).
 - `exact_window_bound` — both `DCC_MCP_CAPCUT_PID` and
   `DCC_MCP_CAPCUT_WINDOW_HANDLE` resolve to positive integers.
 - `bridge_reachable` — `GET /health` answers `ok`.
 - `panel_connected` — the panel polled `/next` within the 35 s lease.
+
+The token is deliberately **not** one of the gates. `ready` answers whether the
+adapter can bind this host and reach the panel on the token actually in force,
+and the documented default `dev-token` is a token that works, so it cannot turn
+a working setup into `ready: false`. A weak token is a security warning, not a
+wiring fault, and the two token facts are reported separately:
+
+- `bridge_token_configured` — an operator-set token exists.
+- `token_is_default` — the token in force is the shared default. This is True
+  both when the token is unset and when it is explicitly `dev-token`, because
+  in both cases the bridge speaks the default.
+
+Treat `token_is_default: true` as an action item, not as a setup failure: set
+`DCC_MCP_CAPCUT_BRIDGE_TOKEN` to a per-user secret before production use. The
+doctor grades it as `warn` through `check_bridge_token`.
 
 Then confirm with `inspect_project` from `capcut-project` before any mutation.
 

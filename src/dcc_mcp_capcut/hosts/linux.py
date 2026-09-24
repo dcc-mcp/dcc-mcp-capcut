@@ -49,6 +49,9 @@ class LinuxHostProvider(HostProvider):
             "supported": False,
             "unsupported": True,
             "reason": UNSUPPORTED_REASON,
+            # No host ships for this platform, so there is no build to grade;
+            # the matrix reports that explicitly instead of staying silent.
+            **self.version_evidence(None),
         }
 
     def installation_plan(self) -> dict[str, Any]:

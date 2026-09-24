@@ -105,6 +105,44 @@ delivery assembles one project per item through the identical host/composed
 decision, and a second copy of that walk would drift the first time one of them
 was fixed.
 
+### 7. An interruption is reconciled, never guessed at
+
+Writing the manifest after every item is not enough when an item takes minutes:
+the window in which a render is running host-side and unknown to the file is
+the *whole render*, not a race between two writes. So the `job_id` is persisted
+the moment the host acknowledges the export, and an `in_flight` marker is
+persisted just before it is submitted — the one interval in which a crash can
+leave an export the adapter cannot name.
+
+A resume reconciles every item that carries either marker **before it dispatches
+anything**, and it selects `running` items too, since that is the state a killed
+run leaves behind. The outcomes are the same ones the timeout path already had:
+settle a `done` job, re-render a finished one, refuse while one is still
+rendering.
+
+The host cannot close the last gap. `get_export_status` takes a `job_id` and
+nothing else, and it exposes no way to find a job by the destination it was
+submitted for, so an export that was acknowledged but never named cannot be
+asked about. That item is refused with the destination it may be writing
+instead of re-exported into — a second render into a path a first may still be
+writing is the silent overwrite the duplicate-destination check exists to
+prevent, arriving through another door.
+
+Two explicit exits keep that from becoming a dead end, and both are operator
+actions rather than automatic ones:
+
+* `verify_output=false` settles an item from the render that exists, without
+  proof and without paying for another.
+* `force_rerender=true` re-exports an item the reconciliation would otherwise
+  settle — including one whose job was never named — but is still refused while
+  that job is rendering, because there is one bound window and no flag makes
+  dispatching into a busy one safe.
+
+What is deliberately *not* here: clearing a settled item's `job_id` so the next
+resume re-exports it by itself. That turns one unreceiptable job into a render
+spent on every subsequent resume, forever, without ever producing the receipt
+the first one lacked.
+
 ## Consequences
 
 - Rendering is sequential and host-bound, and the skill says so in its

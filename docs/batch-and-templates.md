@@ -84,13 +84,22 @@ A batch fails one item at a time.
 | --- | --- |
 | Build | Every variable set is rendered up front. One that does not compile is recorded as `failed` with the reason; the rest still build. |
 | Dispatch | An item that fails at the host keeps its error and the batch moves on. `continue_on_error=false` stops instead and marks the remainder `skipped`. |
-| Write | The manifest at `manifest_path` is rewritten atomically after every item, so an interruption costs at most the item in flight. |
+| Write | The manifest at `manifest_path` is rewritten atomically after every item — and again the moment an export is submitted — so an interruption costs at most the item in flight, and never loses the job that item was rendering. |
 
 Resume with `run_batch(manifest_path=..., resume=true)`: delivered items are
-left alone, `pending`, `failed` and `skipped` items are attempted again — the
-last of those being the items a stopped batch never reached, without which a
-batch that stopped once could never be finished. A fresh run never overwrites
-an existing manifest — that file is the record of renders already paid for.
+left alone, `pending`, `failed`, `skipped` and the item a crash left `running`
+are attempted again — the `skipped` ones being the items a stopped batch never
+reached, without which a batch that stopped once could never be finished. A
+fresh run never overwrites an existing manifest — that file is the record of
+renders already paid for.
+
+Every resumed item that carries a job — a `job_id`, or an `in_flight` marker
+saying an export went out unnamed — is reconciled with the host before anything
+is dispatched, so no destination ever takes a second export. See
+[`capcut-batch`](../src/dcc_mcp_capcut/skills/capcut-batch/SKILL.md#failure-isolation-and-resume)
+for the table, and for the two ways out of an item the reconciliation cannot
+settle: `verify_output=false` to accept the render without proof, and
+`force_rerender=true` to pay for a new one.
 
 ## Receipts
 

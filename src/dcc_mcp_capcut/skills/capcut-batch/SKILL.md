@@ -33,7 +33,7 @@ variant, after substitution, before anything is dispatched.
 | Tool | Mutating | Idempotent | Notes |
 | --- | --- | --- | --- |
 | `render_batch_template` | no | yes | Template plus variable sets in, every compiled plan, reframe report and encode preset out. No host, no files. Run this first. |
-| `run_batch` | yes | yes | Assembles and exports each item in turn. Writes the manifest after every item. `dry_run=true` dispatches nothing. |
+| `run_batch` | yes | yes | Assembles and exports each item in turn. Writes the manifest after every item and again when an export is submitted. `dry_run=true` dispatches nothing; `force_rerender=true` re-exports items that a resume would otherwise settle from a job they already have. |
 | `batch_status` | no | yes | Reads a manifest back: per-item state, output path, receipt, error. |
 
 `run_batch` is idempotent per output path: a delivered item is never
@@ -148,27 +148,47 @@ A batch fails one item at a time:
 - An item that **fails at dispatch** keeps its error on the item and the batch
   moves on. `continue_on_error=false` stops instead and marks the remainder
   `skipped`.
-- `manifest_path` is rewritten atomically after every item, so an interruption
-  — crash, timeout, closed laptop — costs at most the item in flight.
+- `manifest_path` is rewritten atomically after every item — and again the
+  moment an export is submitted, before the wait for it starts — so an
+  interruption — crash, timeout, closed laptop — costs at most the item in
+  flight, and never loses the job that item was rendering.
 
 To continue: `run_batch(manifest_path=..., resume=true)`. Delivered items are
-left alone; `pending`, `failed` **and `skipped`** items are attempted again —
-including the items a stopped batch never reached, which is the whole point,
-since a batch that stopped is otherwise unfinishable. A fresh run will never
-overwrite an existing manifest — that file is the record of renders you have
-already paid for.
+left alone; `pending`, `failed`, `skipped` **and the item a crash left
+`running`** are attempted again — the `skipped` ones being the items a stopped
+batch never reached, which is the whole point, since a batch that stopped is
+otherwise unfinishable. A fresh run will never overwrite an existing manifest —
+that file is the record of renders you have already paid for.
 
-A resumed item that failed **after** its export was submitted is asked about
-before anything is re-rendered, because that job may still be out there:
+A resumed item that still carries a job is asked about before anything is
+re-rendered, because that job may still be out there:
 
 | The abandoned job reports | What the resume does |
 | --- | --- |
 | `done` | Settles the item from that render. No second export. |
 | `failed` / `cancelled` / `error` | The job is over, so the item is re-rendered. |
 | still running | Refuses to continue, and names the job holding the window. |
+| submitted but never named | Refuses that item only, and names the destination. See below. |
 
-That last row is the one that matters: two exports to one destination through
-one bound window would silently overwrite the first render.
+That last pair is what matters: two exports to one destination through one
+bound window would silently overwrite the first render.
+
+**An export the host acknowledged but never gave a `job_id` for cannot be
+asked about.** The host exposes no way to look a job up by the destination it
+was submitted for, so a resume leaves that item failed rather than re-exporting
+into a file a render may still be writing. Check the destination and the CapCut
+window yourself; when you want the item rendered anyway, resume with
+`force_rerender=true`.
+
+`force_rerender=true` is the explicit way to spend a render on an item that is
+otherwise settled: one that is stuck on a job the host reports as `done` but
+cannot produce a receipt for, or one whose job was never named. It is refused
+while that job is still rendering — cancel it first — because there is one bound
+window and no flag makes dispatching into a busy one safe.
+
+The cheap exit for an unreceiptable render is the other direction:
+`resume=true, verify_output=false` settles the item from the render that exists,
+without proof and without paying for another one.
 
 ## Prerequisites
 
@@ -195,11 +215,12 @@ If the first three are unproven, run `capcut-setup` first.
 | `fit='cover' requires safe_area` | A cropping reframe with no declared safe area. | Declare `safe_area`, or use `fit='contain'` and take bars. |
 | `would crop into the declared safe area` | The requested crop eats protected picture. | Lower `safe_area`, change the source aspect, or use `contain`. |
 | `output.export size ... does not match the canvas` | An encode size of another aspect. | Reframe under `output.reframe`, where the safe area is checked. |
-| `export_video acknowledged the job without a job_id` | The host gave nothing to poll. | That item cannot be proven; check the destination file by hand and fix the host integration. |
+| `export_video acknowledged the job without a job_id` | The host gave nothing to poll, so the export cannot be read or cancelled. | That item cannot be proven. Check the destination by hand and fix the host integration; a resume will **not** re-export it, because one may already be running. When the destination is clear, resume with `force_rerender=true`. |
 | `export job '...' finished in state 'failed'` | The render itself failed. | Fix the cause, then `resume=true` with `retry_failed=true`. |
-| `returned no artifact receipt under verification.output` | The host cannot prove the file exists. | Verify the file yourself, or set `verify_output=false` to accept the host's word and lose per-item proof. |
+| `returned no artifact receipt under verification.output` | The host cannot prove the file exists. | Verify the file yourself. To settle the item without proof, resume with `verify_output=false`; to render it again, resume with `force_rerender=true`. Resuming unchanged asks the same finished job the same question, so it will not spend a render by itself. |
+| `may already have an export in flight to '...'` | The last run dispatched an export to that path and died before its `job_id` came back. | Nothing was dispatched to it. Check the destination and the CapCut window, then resume with `force_rerender=true`. |
 | `did not reach a terminal state within ...` | One item's export overran its timeout. | The batch stopped: that job is still rendering and holds the bound window. Read it with `get_export_status` or `cancel_export` it, then resume. |
-| `still has export job ... in state 'running'` | A resume found the abandoned job still rendering. | Nothing was dispatched. Read that job with `get_export_status` or `cancel_export` it, then resume again. |
+| `still has export job ... in state 'running'` | A resume found the abandoned job still rendering. | Nothing was dispatched. Read that job with `get_export_status` or `cancel_export` it, then resume again. `force_rerender=true` does not override this — cancel the job first. |
 | `output.path ... is already used by item N` | Two variable sets render to one destination. | Give each item a distinct `output_path`, usually by putting a variable in the template's `output_path`. |
 | `manifest_path ... already exists` | A fresh run aimed at an existing batch. | Pass `resume=true` to continue it, or pick a new path. |
 

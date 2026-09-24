@@ -262,6 +262,11 @@ def _item(index: int, variables: dict[str, Any]) -> dict[str, Any]:
         "output_path": None,
         "timeline_id": None,
         "job_id": None,
+        # True from just before the export is dispatched until the host's
+        # ``job_id`` has been written to disk. That gap is where a crash can
+        # lose an export the adapter can no longer name, so it is recorded as
+        # a question a resume has to answer rather than silently re-rendering.
+        "in_flight": False,
         "receipt": None,
         "error": None,
         "attempts": 0,
@@ -414,11 +419,19 @@ def _index(manifest: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def begin_item(manifest: dict[str, Any], index: int) -> dict[str, Any]:
-    """Mark an item as running and count the attempt."""
+    """Mark an item as running and count the attempt.
+
+    The attempt starts from a clean slate: the previous error and the previous
+    attempt's in-flight marker both belong to a run that is over. Clearing
+    ``in_flight`` here does not authorise a re-export -- that is the
+    reconciliation pass, which either refuses the item or releases it before
+    any item reaches this point.
+    """
     item = _index(manifest, index)
     item["state"] = "running"
     item["attempts"] = int(item.get("attempts") or 0) + 1
     item["error"] = None
+    item["in_flight"] = False
     return item
 
 
@@ -462,7 +475,11 @@ def skip_item(manifest: dict[str, Any], index: int, reason: str) -> dict[str, An
 
 
 def select_items(
-    manifest: dict[str, Any], *, retry_failed: bool = False, retry_skipped: bool = False
+    manifest: dict[str, Any],
+    *,
+    retry_failed: bool = False,
+    retry_skipped: bool = False,
+    retry_running: bool = False,
 ) -> list[int]:
     """The indices still worth attempting, in order.
 
@@ -478,13 +495,23 @@ def select_items(
     leave every batch that ever stopped permanently short, and the documented
     recovery for a stopped batch is exactly "deal with the job, then resume".
 
-    A ``done`` item is never re-attempted under either flag.
+    ``retry_running`` is what makes a **crashed** batch resumable. A run that
+    dies mid-render leaves the item in flight marked ``running`` -- the state
+    it was in when its export was submitted. Selecting only ``pending``,
+    ``failed`` and ``skipped`` would leave that item running forever on paper,
+    and the render it already paid for would be written off. It is safe to
+    select because the reconciliation pass asks the host about that item's job
+    before anything is dispatched, exactly as it does for a ``failed`` one.
+
+    A ``done`` item is never re-attempted under any flag.
     """
     wanted = {"pending"}
     if retry_failed:
         wanted.add("failed")
     if retry_skipped:
         wanted.add("skipped")
+    if retry_running:
+        wanted.add("running")
     return [item["index"] for item in manifest["items"] if item["state"] in wanted]
 
 

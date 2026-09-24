@@ -680,6 +680,33 @@ def test_a_delivered_item_is_never_selected_again():
     assert select_items(manifest, retry_failed=True) == [1, 2]
 
 
+def test_an_item_interrupted_mid_render_is_selected_only_by_a_resume():
+    """A killed run leaves its item ``running``, not ``pending``.
+
+    Selecting only pending, failed and skipped would leave that item running on
+    paper forever and write off the render it already paid for, which is the
+    crash this whole manifest exists to survive.
+    """
+    manifest = build_batch(TEMPLATE, VARIABLES)
+    complete_item(manifest, 0)
+    begin_item(manifest, 1)
+
+    assert select_items(manifest) == [2]
+    assert select_items(manifest, retry_failed=True) == [2]
+    assert select_items(manifest, retry_failed=True, retry_running=True) == [1, 2]
+
+
+def test_a_new_attempt_drops_the_marker_of_the_attempt_before_it():
+    # begin_item starts a clean slate the same way it clears the error: an
+    # in-flight marker from a run that is over must not outlive it.
+    manifest = build_batch(TEMPLATE, VARIABLES)
+    manifest["items"][0]["in_flight"] = True
+
+    begin_item(manifest, 0)
+
+    assert manifest["items"][0]["in_flight"] is False
+
+
 def test_skipping_only_touches_items_that_were_never_attempted():
     manifest = build_batch(TEMPLATE, VARIABLES)
     complete_item(manifest, 0)
@@ -749,6 +776,18 @@ def test_render_requires_a_template_and_variables(render_skill):
 # ---------------------------------------------------------------------------
 
 
+class KillProcess(BaseException):
+    """What a kill looks like from inside the run: nothing catches it.
+
+    Deliberately a ``BaseException``. A real kill raises nothing at all, and
+    the next best thing is an exception the runner's own failure isolation --
+    which catches ``RuntimeError``, ``OSError`` and ``ValueError`` -- cannot
+    turn into a tidy per-item failure, and one the skill envelope cannot turn
+    into a manifest write. The manifest a killed run leaves behind is exactly
+    what its last checkpoint wrote, and that is the only thing a resume has.
+    """
+
+
 class FakeHost:
     """A recording stand-in for the bridge.
 
@@ -763,6 +802,8 @@ class FakeHost:
         omit_job_id_for=(),
         no_receipt_for=(),
         stalled_jobs=(),
+        crash_before_export_for=(),
+        crash_while_rendering_for=(),
     ):
         self.calls: list[tuple[str, dict]] = []
         self.fail_export_for = set(fail_export_for)
@@ -773,6 +814,12 @@ class FakeHost:
         # a message that says the job is still running rather than time out the
         # whole batch.
         self.stalled_jobs = set(stalled_jobs)
+        # Two places a run can be killed, chosen because they are the two ends
+        # of the window the manifest has to cover: after the export was asked
+        # for but before its job_id came back, and after that job_id was
+        # written but while the render was still going.
+        self.crash_before_export_for = set(crash_before_export_for)
+        self.crash_while_rendering_for = set(crash_while_rendering_for)
         self.exports = 0
         self.polls: list[str] = []
         self.destinations: dict[str, str] = {}
@@ -799,8 +846,10 @@ class FakeHost:
         if action == "import_subtitles":
             return {"verification": {"ok": True, "timeline": TIMELINE}, "caption_ids": ["c-1"]}
         if action == "export_video":
-            self.exports += 1
             path = params["output_path"]
+            if path in self.crash_before_export_for:
+                raise KillProcess(f"killed submitting an export to {path}")
+            self.exports += 1
             if path in self.omit_job_id_for:
                 return {"verification": {"ok": True}, "output_path": path}
             job_id = f"job-{self.exports}"
@@ -815,6 +864,8 @@ class FakeHost:
             }
         if action == "get_export_status":
             self.polls.append(params["job_id"])
+            if params["job_id"] in self.crash_while_rendering_for:
+                raise KillProcess(f"killed while {params['job_id']} was rendering")
             if params["job_id"] in self.stalled_jobs:
                 return {"state": "running", "progress": 0.4}
             state = "failed" if params["job_id"] in self.fail_export_for else "done"
@@ -1196,6 +1247,65 @@ def test_an_orphan_that_cannot_be_receipted_fails_only_itself(run_skill, media_d
     assert stored["items"][0]["job_id"] == "job-1"
 
 
+def test_an_orphan_without_a_receipt_is_settled_when_proof_is_not_asked_for(
+    run_skill, media_dir, tmp_path
+):
+    """The cheap way out of a render that exists but cannot be proven.
+
+    The item is stuck on purpose: the job is done, so the destination holds a
+    finished render, and asking again costs a whole render to re-learn that the
+    host cannot produce a receipt. Accepting the host's word settles it for
+    nothing. Re-rendering is the other exit, and it is the flag below.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.no_receipt_for = {"job-2"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    assert load_batch(str(manifest))["items"][1]["state"] == "failed"
+
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True, verify_output=False))
+
+    assert context["complete"] is True
+    # Delivered without proof, and it says so: no receipt rather than a
+    # fabricated one.
+    assert context["items"][1]["receipt"] is None
+    # Nothing was re-rendered. Three items, three exports, start to finish.
+    assert run_skill.host.exports == 3
+
+
+def test_a_forced_resume_renders_an_unreceiptable_orphan_again(run_skill, media_dir, tmp_path):
+    """The other exit: pay for the render again, on purpose.
+
+    Clearing the job id so the next resume re-exports by itself is the trap
+    here -- it would re-render on every resume and never converge. The render
+    is re-asked for only when the operator says so.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.no_receipt_for = {"job-2"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
+    # Item 1 was rendered again; items 0 and 2 kept theirs.
+    assert run_skill.host.exports == 4
+    assert load_batch(str(manifest))["items"][1]["job_id"] == "job-4"
+
+
 def test_a_resume_renders_again_only_when_the_orphan_job_ended(run_skill, media_dir, tmp_path):
     """The three things an interrupted job can turn out to be."""
     manifest = tmp_path / "batch.json"
@@ -1242,9 +1352,147 @@ def test_a_resume_never_joins_a_job_that_is_still_running(run_skill, media_dir, 
     assert run_skill.host.exports == 2
 
 
-def test_a_failed_item_without_a_job_is_reattempted_normally(run_skill, media_dir, tmp_path):
-    # An item that failed before its export was submitted has no job to ask
-    # about, so there is nothing to settle and nothing to wait for.
+def _killed_run(run_skill, media_dir, manifest, **kwargs):
+    """Run a batch that dies mid-flight, and return the failure envelope.
+
+    ``skill_entry`` turns even a ``BaseException`` into an envelope, so what a
+    kill leaves behind is not the return value -- it is the manifest, at the
+    last checkpoint the run reached. That is what the caller asserts on.
+    """
+    result = run_skill.main(
+        template=TEMPLATE,
+        variables=VARIABLES,
+        media_dir=str(media_dir),
+        manifest_path=str(manifest),
+        **kwargs,
+    )
+    assert result["success"] is False
+    return result
+
+
+def test_a_crash_mid_render_leaves_the_job_on_disk(run_skill, media_dir, tmp_path):
+    """The manifest a killed run leaves is the one that makes it resumable.
+
+    The window here is the whole render, not a race: the job id is written the
+    moment the host acknowledges the export, so an interruption at any point
+    after that has to find the job on disk rather than re-export the item.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.crash_while_rendering_for = {"job-2"}
+
+    _killed_run(run_skill, media_dir, manifest)
+
+    stored = load_batch(str(manifest))
+    # The item in flight is still marked running -- that is the state it was in
+    # -- and it carries the job the killed run paid for.
+    assert stored["items"][1]["state"] == "running"
+    assert stored["items"][1]["job_id"] == "job-2"
+    assert stored["items"][1]["in_flight"] is False
+    assert stored["items"][2]["state"] == "pending"
+
+
+def test_a_resume_after_a_crash_settles_the_job_the_run_paid_for(run_skill, media_dir, tmp_path):
+    """End to end: kill a run mid-render, resume, deliver all three."""
+    manifest = tmp_path / "batch.json"
+    run_skill.host.crash_while_rendering_for = {"job-2"}
+    _killed_run(run_skill, media_dir, manifest)
+
+    # The render the killed run submitted turns out to have finished.
+    run_skill.host.crash_while_rendering_for = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert context["complete"] is True
+    # One export per item: the abandoned job was settled, not re-submitted, so
+    # no destination ever took a second render.
+    assert run_skill.host.exports == 3
+    assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
+
+
+def test_a_resume_after_a_crash_refuses_while_that_job_still_renders(
+    run_skill, media_dir, tmp_path
+):
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    run_skill.host.crash_while_rendering_for = {"job-2"}
+    _killed_run(run_skill, media_dir, manifest)
+
+    # The window is still busy with the render the killed run started.
+    run_skill.host.crash_while_rendering_for = set()
+    result = run_skill.main(manifest_path=str(manifest), resume=True)
+
+    assert result["success"] is False
+    assert "still has export job 'job-2'" in result["message"]
+    assert run_skill.host.exports == 2
+
+
+def test_a_crash_before_the_job_id_is_recorded_refuses_that_item(run_skill, media_dir, tmp_path):
+    """The one gap no host contract can close from this side.
+
+    The export went out and the acknowledgement never came back, so the adapter
+    cannot name the job and the host offers no way to find it by destination.
+    Re-exporting is the silent overwrite; refusing the item, and saying which
+    destination it will not touch, is the honest answer.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.crash_before_export_for = {"out/promo_zh_9:16.mp4"}
+    _killed_run(run_skill, media_dir, manifest)
+
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["in_flight"] is True
+    assert stored["items"][1]["job_id"] is None
+
+    run_skill.host.crash_before_export_for = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+    assert "may already have an export in flight" in context["items"][1]["error"]
+    assert run_skill.host.exports == 2
+
+    # The operator looked at the destination and wants the render anyway.
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True))
+
+    assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    assert run_skill.host.exports == 3
+
+
+def test_force_rerender_still_waits_for_a_job_that_is_rendering(run_skill, media_dir, tmp_path):
+    """The one thing an operator cannot assert away.
+
+    ``force_rerender`` releases a destination. It does not dispatch into a
+    window the host is still using: there is one, and the abandoned job holds
+    it. Cancel that job, then force.
+    """
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-1"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    assert run_skill.host.exports == 1
+
+    result = run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True)
+
+    assert result["success"] is False
+    assert "still has export job 'job-1'" in result["message"]
+    assert run_skill.host.exports == 1
+
+
+def test_an_export_the_host_never_named_is_not_resent(run_skill, media_dir, tmp_path):
+    """A host that acknowledged an export but returned no job_id.
+
+    The export is out there and the adapter cannot ask about it: the host
+    exposes no way to look a job up by the destination it was submitted for.
+    Re-exporting would put a second render into that destination while the
+    first may still be running, which is the silent overwrite the duplicate
+    destination check exists to prevent -- arrived at from another door.
+    """
     manifest = tmp_path / "batch.json"
     run_skill.host.omit_job_id_for = {"out/promo_zh_9:16.mp4"}
     ok(
@@ -1255,12 +1503,27 @@ def test_a_failed_item_without_a_job_is_reattempted_normally(run_skill, media_di
             manifest_path=str(manifest),
         )
     )
-    assert load_batch(str(manifest))["items"][1]["job_id"] is None
+    stored = load_batch(str(manifest))
+    assert stored["items"][1]["job_id"] is None
+    assert stored["items"][1]["in_flight"] is True
 
     run_skill.host.omit_job_id_for = set()
     context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
 
+    assert [item["state"] for item in context["items"]] == ["done", "failed", "done"]
+    # The refusal names the destination at risk and the way out of it.
+    assert "may already have an export in flight" in context["items"][1]["error"]
+    assert "out/promo_zh_9:16.mp4" in context["items"][1]["error"]
+    assert "force_rerender=true" in context["items"][1]["error"]
+    # Isolated to that item: nothing was re-exported, and the two items around
+    # it kept the renders the first run delivered.
+    assert run_skill.host.exports == 3
+
+    # The operator checked the destination and asked for the render anyway.
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True, force_rerender=True))
+
     assert context["complete"] is True
+    assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
     assert run_skill.host.exports == 4
 
 

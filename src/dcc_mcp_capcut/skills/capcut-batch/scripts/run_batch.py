@@ -16,6 +16,15 @@ caller:
   receipt, requested through the same ``verify_output`` flag a single export
   uses, so a batch is accepted one artifact at a time rather than on trust.
 
+Interruption is the case the state machine exists for, and it is wider than a
+crash between two writes: an item's export is dispatched, acknowledged and
+written to the manifest before the first poll, and the reconciliation a resume
+runs before it dispatches anything covers every item that carries either a
+``job_id`` or an ``in_flight`` marker. What it cannot do is name an export the
+host acknowledged but never handed back a ``job_id`` for -- the host exposes no
+way to look a job up by its destination -- so that item is refused with the
+destination it may be writing rather than re-exported into.
+
 Two constraints are worth stating plainly because they are properties of the
 host, not of this tool. Rendering is **sequential**: CapCut exposes one bound
 foreground window, so this call takes roughly N times one render. And a batch
@@ -142,38 +151,101 @@ def _read_receipt(
     return validate_export_receipt("export_video", receipt, expected_path=output_path)
 
 
+# The item states an interrupted run can leave behind. ``failed`` is what the
+# timeout path writes; ``running`` is what a crash mid-render leaves, because an
+# item is marked running before its export is even submitted.
+_UNSETTLED_ITEM_STATES = ("failed", "running")
+
+
+def _job_state(job_id: str, index: int, item: dict[str, Any]) -> str:
+    """Read one abandoned job, refusing to continue while it still renders."""
+    status = dispatch("get_export_status", {"job_id": job_id})
+    state = status.get("state")
+    if state is None:
+        raise RuntimeError(
+            f"get_export_status returned no 'state' for job {job_id!r}; the job "
+            "cannot be read to completion"
+        )
+    if state in TERMINAL_EXPORT_STATES:
+        return state
+    raise HostStillRunning(
+        f"item {index} still has export job {job_id!r} in state {state!r}; the host is "
+        f"rendering it and the batch cannot start another export to "
+        f"{item['output_path']!r}. Read it with get_export_status, or cancel_export "
+        "it, before resuming."
+    )
+
+
 def _settle_orphaned_jobs(
     manifest: dict[str, Any],
     indices: list[int],
     *,
     verify_output: bool,
+    force_rerender: bool = False,
 ) -> list[int]:
-    """Find out what the last job of each failed item did before re-rendering.
+    """Find out what the last job of each interrupted item did before re-rendering.
 
     An item that failed after its export was submitted -- a timeout, most
-    likely -- left a job behind. Re-exporting it would put two renders into one
-    destination through one bound window, which is exactly what stopping the
-    batch on a timeout is meant to prevent. So a failed item carrying a
-    ``job_id`` is asked about first:
+    likely -- left a job behind, and so does an item that was interrupted
+    mid-render: the ``job_id`` is written to the manifest the moment the host
+    acknowledges the export, precisely so a crash minutes into a render does
+    not lose it. Re-exporting either would put two renders into one destination
+    through one bound window, which is exactly what stopping the batch on a
+    timeout is meant to prevent. So an interrupted item is asked about first:
 
     * ``done`` — it finished after all; settle it from that job.
     * any other terminal state — the job is over, so a re-export is safe.
     * still running — the batch cannot continue, and says which job holds it.
+    * submitted but unnamed — an export went out and no ``job_id`` came back,
+      so there is nothing to ask the host about and the item is refused.
 
     Each orphan is settled **inside the loop's own failure isolation**: a job
     that reports done but cannot produce a receipt is that item's problem, not
     the whole resume's. Letting it propagate would abandon every other item in
     the batch -- and the manifest is not written yet at this point, so the
     failure would not even be recorded.
+
+    ``force_rerender`` is the operator's way out of a settled-but-stuck item: it
+    releases the destination and re-exports instead of asking again. It does not
+    override a job the host reports as still rendering -- there is one bound
+    window, and no flag makes dispatching into a busy one safe.
     """
     remaining: list[int] = []
     for index in indices:
         item = manifest["items"][index]
         job_id = item.get("job_id")
-        if item["state"] != "failed" or not job_id:
+        in_flight = bool(item.get("in_flight"))
+        if item["state"] not in _UNSETTLED_ITEM_STATES or not (job_id or in_flight):
+            remaining.append(index)
+            continue
+        if force_rerender:
+            try:
+                if job_id:
+                    _job_state(job_id, index, item)
+            except HostStillRunning:
+                # The one thing an operator cannot assert away: that job is
+                # holding the window, so the whole batch has to wait.
+                raise
+            except (RuntimeError, OSError, ValueError) as error:
+                fail_item(manifest, index, error)
+                continue
+            item["job_id"] = None
+            item["in_flight"] = False
             remaining.append(index)
             continue
         try:
+            if not job_id:
+                # The host acknowledged an export but never handed back a
+                # handle, and it exposes no way to look a job up by the
+                # destination it was submitted for -- so the only safe answer
+                # is to leave the destination alone and say why.
+                raise RuntimeError(
+                    f"item {index} may already have an export in flight to "
+                    f"{item['output_path']!r}: the last run dispatched one and did not "
+                    "record its job_id, so this adapter cannot ask the host whether it "
+                    "is still rendering. Check the destination and the CapCut window, "
+                    "then resume with force_rerender=true to render this item again."
+                )
             status = dispatch("get_export_status", {"job_id": job_id})
             state = status.get("state")
             if state == SUCCESS_EXPORT_STATE:
@@ -189,9 +261,13 @@ def _settle_orphaned_jobs(
                 )
                 continue
         except (RuntimeError, OSError, ValueError) as error:
-            # Settle it as this item's failure and keep going: the destination
-            # is still occupied by a finished render, so it is re-exported only
-            # when the operator asks for it by resuming again.
+            # Settle it as this item's failure and keep going, holding on to the
+            # handle it was left with. That is what makes the next resume ask
+            # the same question instead of re-exporting into a destination that
+            # may already hold a finished render -- and it is why the way out is
+            # an explicit one: ``verify_output=false`` to settle the item from
+            # the render that exists without proof, or ``force_rerender=true``
+            # to pay for a new one.
             fail_item(manifest, index, error)
             continue
         if state in TERMINAL_EXPORT_STATES:
@@ -207,6 +283,17 @@ def _settle_orphaned_jobs(
     return remaining
 
 
+def _checkpoint(manifest_path: Optional[str], manifest: dict[str, Any]) -> None:
+    """Write the manifest now, when the run has one.
+
+    A batch that never named a manifest path cannot be resumed, so it has
+    nothing to checkpoint; the write is still the same atomic replace every
+    other save uses.
+    """
+    if manifest_path:
+        save_batch(manifest_path, manifest)
+
+
 def _run_item(
     manifest: dict[str, Any],
     index: int,
@@ -216,8 +303,14 @@ def _run_item(
     verify_output: bool,
     poll_interval_secs: float,
     item_timeout_secs: float,
+    manifest_path: Optional[str] = None,
 ) -> None:
-    """Assemble, export and settle one item, recording whatever happens."""
+    """Assemble, export and settle one item, recording whatever happens.
+
+    The export is bracketed by two manifest writes, and that is the point: a
+    batch that dies with the render half done has to leave behind enough for a
+    resume to tell "never submitted" from "submitted, here is the job".
+    """
     # Read the build verdict before the item is marked running: begin_item
     # clears ``error`` so a retry starts from a clean slate, and that clear
     # would otherwise erase the only record of why the item never compiled.
@@ -256,12 +349,20 @@ def _run_item(
 
         params = dict(item["export"] or {})
         params.update({"timeline_id": timeline_id, "output_path": item["output_path"]})
+        # Written *before* the export goes out. The whole render, not a race,
+        # is what the next write covers; this one covers the gap in which a
+        # crash would otherwise leave a submitted export the adapter cannot
+        # name -- and an unnamed export is the one a resume must not re-send.
+        item["in_flight"] = True
+        _checkpoint(manifest_path, manifest)
         submit = dispatch("export_video", params)
         job_id = submit.get("job_id")
         if not job_id:
             # Documented degradation for a single export, fatal for a batch:
             # with no handle there is nothing to poll, so the item can never be
-            # proven and the operator gets a silent unknown.
+            # proven and the operator gets a silent unknown. ``in_flight`` stays
+            # set on purpose -- the host acknowledged the export, so one may be
+            # running, and a resume has no business sending another.
             raise RuntimeError(
                 "export_video acknowledged the job without a job_id, so this item "
                 f"cannot be read to completion (destination {item['output_path']!r}). "
@@ -269,8 +370,11 @@ def _run_item(
             )
         # Persisted with the failure too, not only with a success: this is the
         # one fact that lets a resume settle the job it already paid for
-        # instead of submitting a second export to the same destination.
+        # instead of submitting a second export to the same destination. From
+        # here the window is the entire render, and it is closed.
         item["job_id"] = job_id
+        item["in_flight"] = False
+        _checkpoint(manifest_path, manifest)
 
         status = _await_export(
             job_id,
@@ -306,6 +410,7 @@ def main(
     manifest_path: str = None,
     resume: bool = False,
     retry_failed: bool = False,
+    force_rerender: bool = False,
     continue_on_error: bool = True,
     verify_output: bool = True,
     dry_run: bool = False,
@@ -369,12 +474,25 @@ def main(
     if manifest_path and not resume:
         fresh_overwrite_check(manifest_path)
 
-    indices = select_items(manifest, retry_failed=retry_failed or resume, retry_skipped=resume)
+    indices = select_items(
+        manifest,
+        retry_failed=retry_failed or resume,
+        retry_skipped=resume,
+        # A run that was killed mid-render left the item it was on marked
+        # ``running``. Selecting it is what lets the reconciliation below
+        # settle -- or refuse -- the job that run already paid for.
+        retry_running=resume,
+    )
     # Asked before anything is dispatched: a job left running by an earlier
     # interrupted run would otherwise be joined by a second export to the same
     # destination. Nothing has been touched yet, so there is no state to save
     # if this refuses to continue.
-    indices = _settle_orphaned_jobs(manifest, indices, verify_output=verify_output)
+    indices = _settle_orphaned_jobs(
+        manifest,
+        indices,
+        verify_output=verify_output,
+        force_rerender=force_rerender,
+    )
     if manifest_path:
         # Written once before the first item so batch_status can see the batch
         # while item 0 is still rendering, rather than only after it lands.
@@ -390,6 +508,7 @@ def main(
                 verify_output=verify_output,
                 poll_interval_secs=poll_interval_secs,
                 item_timeout_secs=item_timeout_secs,
+                manifest_path=manifest_path,
             )
         except HostStillRunning as error:
             # The item is recorded as failed before this propagates, so the

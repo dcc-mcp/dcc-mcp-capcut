@@ -63,6 +63,10 @@ tools:
           type: boolean
           default: false
           description: "Re-attempt items that failed. Implied by resume; delivered items are never re-rendered."
+        force_rerender:
+          type: boolean
+          default: false
+          description: "On a resume, re-export items that already have a finished or abandoned job instead of settling them from it. The only way to re-render an interrupted or unreceiptable item; refused while that job is still rendering."
         continue_on_error:
           type: boolean
           default: true

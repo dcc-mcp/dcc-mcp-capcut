@@ -94,7 +94,7 @@ batch action at its own pace; until then `auto` resolves to the composed path.
 
 The host implementation should return stable IDs (`media_id`, `timeline_id`,
 `clip_id`, `text_id`, `effect_id`, `job_id`) and include a post-operation
-readback (`project`, `timeline`, or `export`) so acceptance can verify the real
+readback (`project`, `timeline`, or `output`) so acceptance can verify the real
 state. Keep this file alongside the panel when adapting it to a CapCut release.
 
 Every mutating action must also return `verification: {ok: true, ...}`. Timeline
@@ -104,3 +104,29 @@ an error. In particular, `import_subtitles` is complete only after the host
 returns non-empty `caption_ids` and the timeline readback proves an editable
 text track exists. Merely importing an SRT/LRC/ASS file into the asset browser
 must not be reported as success.
+
+### Opt-in export receipt: `verify_output`
+
+`export_video`, `export_thumbnail`, `get_export_status` and `build_vlog_demo`
+accept an optional `verify_output` flag. It defaults to `false`, and while it is
+`false` the host owes nothing beyond what it returns today.
+
+When a caller passes `verify_output: true`, the host must probe the rendered
+file itself and return the receipt under `verification.output`: `path`,
+`exists: true`, `size_bytes`, `duration_sec` (timed media only) and a non-empty
+`streams` list with at least one `video` or `image` stream. The full field table
+is normative in `skills/references/export-and-verification.md`; the adapter
+rejects an absent or incomplete receipt rather than filling it in.
+
+Two rules catch the mistakes that make a receipt worthless:
+
+- Report what the probe found, not what the export asked for. Restating the
+  requested width and height is not a probe, and a `duration_sec` copied from
+  the timeline while the file is truncated is worse than no receipt.
+- A still has no duration. `export_thumbnail` returns one `image` stream and
+  omits `duration_sec`; supplying one is rejected.
+
+The adapter never synthesises this receipt and never probes the file itself, so
+a host that cannot probe should simply not be called with the flag rather than
+returning a partial object. `ffprobe` is the reference probe and is not bundled
+with this package.

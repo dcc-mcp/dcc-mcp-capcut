@@ -119,6 +119,98 @@ Other rules for reading a job out:
    A host that returns only `output_path` satisfies 1 and 2 and skips 3 — for
    that path the file plus `ffprobe` *is* the whole completion proof.
 
+## Export receipt (opt-in)
+
+The default export contract proves only that a job was accepted. A caller that
+wants proof about the artifact asks for it: pass `verify_output: true` to
+`export_video`, `export_thumbnail`, `get_export_status`, or `build_vlog_demo`.
+
+The flag is strictly opt-in and defaults to `false`, so a caller that never
+passes it keeps exactly the contract it has today. When it is passed, the host
+must probe the rendered file and return the receipt under
+`verification.output`, and the adapter fails closed when the receipt is missing
+or incomplete. `get_export_status` is read-only, so this receipt is the only
+contract rule that ever applies to it.
+
+The adapter never synthesises a receipt and never probes the file itself:
+duration and stream facts come from a probe the **host** runs (`ffprobe` or an
+equivalent). That is also why the receipt is opt-in — a host that cannot probe
+must be able to decline instead of failing every export for every caller.
+
+### `verification.output` fields
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `path` | string | yes | Non-empty path of the artifact that was probed. |
+| `exists` | boolean | yes | Must be `true`. A receipt for a file that is not on disk is not a receipt. |
+| `size_bytes` | integer | yes | Size on disk. Must be `>= 1`; a zero-byte file is a failed render. |
+| `duration_sec` | number or null | conditional | Duration. Must be `> 0` when any stream is `video` or `audio`; must be omitted or `null` otherwise. |
+| `streams` | array | yes | Non-empty list of stream objects; at least one must be `video` or `image`. |
+| `width` | integer or null | no | Picture width, when the host knows it. Must be `>= 1` when present. |
+| `height` | integer or null | no | Picture height, when the host knows it. Must be `>= 1` when present. |
+| `probe` | object or null | no | How the receipt was measured. Optional, but a present `probe.tool` must be a non-empty string. |
+
+### `streams[]` fields
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `kind` | string | yes | One of `video`, `audio`, `image`, `subtitle`, `data`. |
+| `codec` | string | yes | Non-empty codec name. |
+| `width` | integer | for `video` and `image` | Must be `>= 1`. |
+| `height` | integer | for `video` and `image` | Must be `>= 1`. |
+| `fps` | number | no | Frames per second. Must be `> 0` when present. |
+| `channels` | integer | no | Audio channel count. Must be `>= 1` when present. |
+| `sample_rate_hz` | integer | no | Audio sample rate. Must be `>= 1` when present. |
+| `duration_sec` | number | no | Stream duration. Must be `> 0` when present. |
+| `bit_rate` | integer | no | Bitrate in bits per second. Must be `>= 0` when present. |
+
+Two cross-field rules do the real work:
+
+- **A deliverable has a picture.** A receipt whose streams are all `audio`,
+  `subtitle` or `data` is rejected: an audio-only artifact is not the video the
+  caller asked to export.
+- **Stills have no duration.** `duration_sec` is required exactly when a
+  `video` or `audio` stream is present. `export_thumbnail` reports one `image`
+  stream and omits it; a still that carries a duration is rejected rather than
+  ignored, because it means the host reported the timeline duration instead of
+  probing the file.
+
+### A video receipt
+
+```json
+{
+  "path": "C:/out/vlog.mp4",
+  "exists": true,
+  "size_bytes": 18345921,
+  "duration_sec": 42.5,
+  "width": 1080,
+  "height": 1920,
+  "streams": [
+    {"kind": "video", "codec": "h264", "width": 1080, "height": 1920, "fps": 30.0},
+    {"kind": "audio", "codec": "aac", "channels": 2, "sample_rate_hz": 48000}
+  ],
+  "probe": {"tool": "ffprobe", "version": "6.0"}
+}
+```
+
+### A still receipt
+
+```json
+{
+  "path": "C:/out/frame.png",
+  "exists": true,
+  "size_bytes": 204813,
+  "width": 1920,
+  "height": 1080,
+  "streams": [{"kind": "image", "codec": "png", "width": 1920, "height": 1080}],
+  "probe": {"tool": "ffprobe", "version": "6.0"}
+}
+```
+
+Batch delivery reports one of these per rendered item and reuses this field set
+verbatim, so the shape above is the contract to depend on rather than a
+per-caller dialect.
+
 ## Portable OpenTimelineIO export
 
 `export_otio` and the `python -m dcc_mcp_capcut.interchange` CLI convert explicit

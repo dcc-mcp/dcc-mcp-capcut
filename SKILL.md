@@ -71,7 +71,8 @@ statement stays in each `SKILL.md`.
 
 A system that produces material upstream of this adapter delivers two documents
 plus a media directory: an asset manifest (paths plus attribution) and the
-canonical edit plan. See `references/upstream-handoff.md` and run
+canonical edit plan. See
+`src/dcc_mcp_capcut/skills/references/upstream-handoff.md` and run
 `python demo/upstream_handoff.py` for a worked example.
 
 ## Before using any skill

@@ -162,6 +162,31 @@ def referenced_paths(plan: dict) -> list[str]:
     return referenced
 
 
+def empty_referenced_files(plan: dict, media_dir: Path) -> list[str]:
+    """Referenced files that exist but hold no bytes, in plan order.
+
+    Existence is not sufficiency, and this is the only place that says so. A
+    zero-byte file passes every check the reconcile stage makes -- it is a
+    file, it is inside the root, it is declared -- and that is exactly the
+    shape of a placeholder: no pixels, no audio, nothing a decoder could read.
+
+    Size is the only signal left, and it is genuinely ambiguous. The handoff
+    contract records no provenance for a media file, so a placeholder written
+    by a previous offline run and a file that is legitimately empty are the
+    same bytes on disk. The caller is told both readings rather than having one
+    chosen for them.
+    """
+    referenced = referenced_paths(plan)
+    resolved = _resolve_referenced_files(media_dir.resolve(), referenced)
+    return [
+        path
+        for path in referenced
+        # A broken symlink is not a file and has no size to read; reconcile
+        # already refuses those, so this stays a guard rather than a check.
+        if resolved[path].is_file() and resolved[path].stat().st_size == 0
+    ]
+
+
 def materialize(manifest: dict, media_dir: Path) -> list[str]:
     """Create a zero-byte placeholder for any declared asset that is not present.
 
@@ -350,6 +375,24 @@ def run(
                 + ", ".join(verdict["placeholders_created"])
                 + ". Supply real media (or re-run with --no-materialize so the "
                 "missing files are reported) before touching a live project."
+            )
+
+        # The guard above only knows about placeholders *this* run wrote. One
+        # left behind by an earlier offline run is already on disk, so nothing
+        # is created for it, `placeholders_created` stays empty, and
+        # --no-materialize cannot help either -- there is no missing file to
+        # report. It is gitignored, so it is invisible until dispatch assembles
+        # it into a real project. Size is the only remaining signal.
+        empty = empty_referenced_files(compiled, media_dir)
+        if empty:
+            raise HandoffError(
+                "refusing to dispatch: these referenced files are zero bytes: "
+                + ", ".join(empty)
+                + ". The handoff contract records no provenance for a media file, "
+                "so a placeholder a previous run created is indistinguishable from "
+                "a file that is legitimately empty; this refuses rather than guess "
+                "which one it is. Supply real media, or delete the file so the run "
+                "reports it as missing instead."
             )
 
         # apply_edit_plan requires media_dir whenever dry_run is false: the

@@ -12,4 +12,9 @@
 interface:
   display_name: "CapCut Batch"
   short_description: "Turn one template plus N variable sets into N deliverables"
-  default_prompt: "Render the template at the manifest path I give you with the variable sets it names, and report the receipt for each deliverable as it finishes."
+  # A batch needs two inputs before it can render anything: the template and
+  # the variable sets. The manifest is a third argument and it means something
+  # different -- it is where the batch records its own state, and it is what a
+  # later `resume=true` reads back. Naming only the manifest is the mistake
+  # this prompt exists to prevent, so the two inputs come first.
+  default_prompt: "Render the template I give you with the variable sets I give you, and pass a manifest path so an interrupted batch resumes; report the receipt for each deliverable as it finishes."

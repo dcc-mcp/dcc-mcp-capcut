@@ -314,6 +314,59 @@ def test_dispatch_refuses_to_run_against_placeholder_media(tmp_path, monkeypatch
     assert calls == [], "dispatch reached the bridge despite placeholder media"
 
 
+def test_dispatch_refuses_placeholders_left_by_an_earlier_run(tmp_path, monkeypatch):
+    """The in-run guard cannot see a placeholder it did not create.
+
+    Placeholders are gitignored, so a previous offline run leaves zero-byte
+    media on disk and walks away. The next run finds nothing missing, so it
+    creates nothing, ``placeholders_created`` stays empty and
+    ``--no-materialize`` has no missing file to report either. Existence checks
+    all pass -- the file is declared, present and inside the root -- so only
+    the size left to read says it is not footage.
+    """
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        upstream_handoff, "_call_bridge", lambda action, params: calls.append((action, params))
+    )
+
+    delivery = delivery_copy(tmp_path)
+    # What an interrupted offline run leaves behind: declared, present, empty.
+    (delivery / "assets").mkdir()
+    for name in ("earthrise.mp4", "oahu_flyover.mp4", "free_ambient.wav"):
+        (delivery / "assets" / name).write_bytes(b"")
+
+    # --no-materialize is the operator's ``report it instead`` switch, and it is
+    # exactly the one that used to let this through.
+    with pytest.raises(upstream_handoff.HandoffError, match="zero bytes"):
+        upstream_handoff.run(delivery, dispatch=True, materialize_placeholders=False)
+    assert calls == [], "dispatch reached the bridge despite zero-byte media"
+
+
+def test_a_legitimately_empty_file_is_reported_not_guessed_at(tmp_path):
+    """The refusal names the ambiguity instead of silently picking a reading.
+
+    A zero-byte file has two honest explanations and the contract cannot tell
+    them apart, so the message has to say both and leave the call to the
+    operator. Asserted on the helper so the wording is the contract, not
+    collateral of one dispatch path.
+    """
+    delivery = delivery_copy(tmp_path)
+    (delivery / "assets").mkdir()
+    (delivery / "assets" / "earthrise.mp4").write_bytes(b"")
+    for name in ("oahu_flyover.mp4", "free_ambient.wav"):
+        (delivery / "assets" / name).write_bytes(b"real")
+
+    assert upstream_handoff.empty_referenced_files(
+        {"tracks": [{"clips": [{"media": "assets/earthrise.mp4"}]}]}, delivery
+    ) == ["assets/earthrise.mp4"]
+
+    with pytest.raises(upstream_handoff.HandoffError) as caught:
+        upstream_handoff.run(delivery, dispatch=True, materialize_placeholders=False)
+    message = str(caught.value)
+    assert "placeholder" in message, "the refusal never mentions the placeholder reading"
+    assert "legitimately empty" in message, "the refusal never mentions the other reading"
+
+
 def test_dispatch_payload_carries_media_dir_and_export(tmp_path, monkeypatch):
     """apply_edit_plan requires media_dir whenever dry_run is false.
 

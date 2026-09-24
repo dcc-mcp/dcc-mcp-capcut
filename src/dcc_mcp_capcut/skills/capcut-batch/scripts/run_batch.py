@@ -142,6 +142,58 @@ def _read_receipt(
     return validate_export_receipt("export_video", receipt, expected_path=output_path)
 
 
+def _settle_orphaned_jobs(
+    manifest: dict[str, Any],
+    indices: list[int],
+    *,
+    verify_output: bool,
+) -> list[int]:
+    """Find out what the last job of each failed item did before re-rendering.
+
+    An item that failed after its export was submitted -- a timeout, most
+    likely -- left a job behind. Re-exporting it would put two renders into one
+    destination through one bound window, which is exactly what stopping the
+    batch on a timeout is meant to prevent. So a failed item carrying a
+    ``job_id`` is asked about first:
+
+    * ``done`` — it finished after all; settle it from that job.
+    * any other terminal state — the job is over, so a re-export is safe.
+    * still running — the batch cannot continue, and says which job holds it.
+    """
+    remaining: list[int] = []
+    for index in indices:
+        item = manifest["items"][index]
+        job_id = item.get("job_id")
+        if item["state"] != "failed" or not job_id:
+            remaining.append(index)
+            continue
+        status = dispatch("get_export_status", {"job_id": job_id})
+        state = status.get("state")
+        if state == SUCCESS_EXPORT_STATE:
+            receipt = _read_receipt(
+                job_id, output_path=item["output_path"], verify_output=verify_output
+            )
+            complete_item(
+                manifest,
+                index,
+                timeline_id=item.get("timeline_id"),
+                job_id=job_id,
+                receipt=receipt,
+            )
+            continue
+        if state in TERMINAL_EXPORT_STATES:
+            # The job ended without a deliverable, so the destination is free.
+            remaining.append(index)
+            continue
+        raise HostStillRunning(
+            f"item {index} still has export job {job_id!r} in state {state!r}; the host "
+            f"is rendering it and the batch cannot start another export to "
+            f"{item['output_path']!r}. Read it with get_export_status, or "
+            "cancel_export it, before resuming."
+        )
+    return remaining
+
+
 def _run_item(
     manifest: dict[str, Any],
     index: int,
@@ -183,6 +235,11 @@ def _run_item(
 
         assembly = assemble(plan, script, media_dir, strategy=strategy)
         timeline_id = assembly.get("timeline_id")
+        # Recorded before the export is submitted: an item that fails later is
+        # written to the manifest with the handles a resume needs to find out
+        # what its last job actually did, instead of re-rendering blind.
+        if timeline_id is not None:
+            item["timeline_id"] = timeline_id
 
         params = dict(item["export"] or {})
         params.update({"timeline_id": timeline_id, "output_path": item["output_path"]})
@@ -197,6 +254,10 @@ def _run_item(
                 f"cannot be read to completion (destination {item['output_path']!r}). "
                 "Check the host integration; the adapter never synthesises a job_id."
             )
+        # Persisted with the failure too, not only with a success: this is the
+        # one fact that lets a resume settle the job it already paid for
+        # instead of submitting a second export to the same destination.
+        item["job_id"] = job_id
 
         status = _await_export(
             job_id,
@@ -292,6 +353,11 @@ def main(
         fresh_overwrite_check(manifest_path)
 
     indices = select_items(manifest, retry_failed=retry_failed or resume)
+    # Asked before anything is dispatched: a job left running by an earlier
+    # interrupted run would otherwise be joined by a second export to the same
+    # destination. Nothing has been touched yet, so there is no state to save
+    # if this refuses to continue.
+    indices = _settle_orphaned_jobs(manifest, indices, verify_output=verify_output)
     if manifest_path:
         # Written once before the first item so batch_status can see the batch
         # while item 0 is still rendering, rather than only after it lands.

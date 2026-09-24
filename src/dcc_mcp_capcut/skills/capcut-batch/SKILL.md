@@ -156,6 +156,18 @@ left alone; `pending` and `failed` items are attempted again. A fresh run will
 never overwrite an existing manifest — that file is the record of renders you
 have already paid for.
 
+A resumed item that failed **after** its export was submitted is asked about
+before anything is re-rendered, because that job may still be out there:
+
+| The abandoned job reports | What the resume does |
+| --- | --- |
+| `done` | Settles the item from that render. No second export. |
+| `failed` / `cancelled` / `error` | The job is over, so the item is re-rendered. |
+| still running | Refuses to continue, and names the job holding the window. |
+
+That last row is the one that matters: two exports to one destination through
+one bound window would silently overwrite the first render.
+
 ## Prerequisites
 
 - CapCut Desktop running with its main window visible and restored, for the
@@ -185,6 +197,7 @@ If the first three are unproven, run `capcut-setup` first.
 | `export job '...' finished in state 'failed'` | The render itself failed. | Fix the cause, then `resume=true` with `retry_failed=true`. |
 | `returned no artifact receipt under verification.output` | The host cannot prove the file exists. | Verify the file yourself, or set `verify_output=false` to accept the host's word and lose per-item proof. |
 | `did not reach a terminal state within ...` | One item's export overran its timeout. | The batch stopped: that job is still rendering and holds the bound window. Read it with `get_export_status` or `cancel_export` it, then resume. |
+| `still has export job ... in state 'running'` | A resume found the abandoned job still rendering. | Nothing was dispatched. Read that job with `get_export_status` or `cancel_export` it, then resume again. |
 | `output.path ... is already used by item N` | Two variable sets render to one destination. | Give each item a distinct `output_path`, usually by putting a variable in the template's `output_path`. |
 | `manifest_path ... already exists` | A fresh run aimed at an existing batch. | Pass `resume=true` to continue it, or pick a new path. |
 

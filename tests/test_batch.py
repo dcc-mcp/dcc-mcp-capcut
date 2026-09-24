@@ -452,14 +452,14 @@ def test_two_items_may_not_render_to_the_same_destination():
     assert manifest["items"][0]["output_path"] == "out/promo.mp4"
 
 
-def test_a_destination_is_only_checked_when_output_is_required():
-    # Inspecting variants may legitimately render the same path twice; the
-    # collision only matters for a batch that will actually write there.
+def test_a_duplicate_destination_is_also_reported_while_inspecting():
+    # Inspection is the cheap moment to find this, so the collision is
+    # reported there too rather than only once a batch starts rendering.
     template = dict(TEMPLATE, output_path="out/promo.mp4")
 
     manifest = build_batch(template, VARIABLES, require_output=False)
 
-    assert manifest["items"][1]["state"] == "failed"
+    assert [item["state"] for item in manifest["items"]] == ["pending", "failed", "failed"]
 
 
 def test_building_rejects_a_variables_list_that_is_not_a_list_of_objects():
@@ -1048,8 +1048,80 @@ def test_resume_keeps_delivered_items_and_retries_failures(run_skill, media_dir,
     context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
 
     assert context["complete"] is True
-    assert run_skill.host.exports == 4  # only the failed item was re-rendered
     assert [item["state"] for item in context["items"]] == ["done", "done", "done"]
+    # The failed item's own job is asked about first and reported done, so it
+    # is settled from the render the first run already paid for -- a resume
+    # must not submit a second export to a destination that already has one.
+    assert run_skill.host.exports == 3
+    assert context["items"][1]["receipt"]["path"] == "out/promo_zh_9:16.mp4"
+
+
+def test_a_resume_renders_again_only_when_the_orphan_job_ended(run_skill, media_dir, tmp_path):
+    """The three things an interrupted job can turn out to be."""
+    manifest = tmp_path / "batch.json"
+    run_skill.host.fail_export_for = {"job-2"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    assert load_batch(str(manifest))["items"][1]["error"]
+
+    # The abandoned job is reported done: settle it, render nothing.
+    run_skill.host.fail_export_for = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+    assert context["counts"] == {"pending": 0, "running": 0, "done": 3, "failed": 0, "skipped": 0}
+    assert run_skill.host.exports == 3
+
+
+def test_a_resume_never_joins_a_job_that_is_still_running(run_skill, media_dir, tmp_path):
+    manifest = tmp_path / "batch.json"
+    run_skill.host.stalled_jobs = {"job-2"}
+    ticks = iter(range(0, 100_000, 1_000))
+    run_skill._CLOCK = lambda: next(ticks)
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    # The job the first run gave up on is still rendering host-side.
+    assert run_skill.host.exports == 2
+
+    result = run_skill.main(manifest_path=str(manifest), resume=True)
+
+    # Refused before dispatching anything, and it names the job that holds the
+    # window. A second export to that destination would overwrite the first.
+    assert result["success"] is False
+    assert "still has export job 'job-2'" in result["message"]
+    assert run_skill.host.exports == 2
+
+
+def test_a_failed_item_without_a_job_is_reattempted_normally(run_skill, media_dir, tmp_path):
+    # An item that failed before its export was submitted has no job to ask
+    # about, so there is nothing to settle and nothing to wait for.
+    manifest = tmp_path / "batch.json"
+    run_skill.host.omit_job_id_for = {"out/promo_zh_9:16.mp4"}
+    ok(
+        run_skill.main(
+            template=TEMPLATE,
+            variables=VARIABLES,
+            media_dir=str(media_dir),
+            manifest_path=str(manifest),
+        )
+    )
+    assert load_batch(str(manifest))["items"][1]["job_id"] is None
+
+    run_skill.host.omit_job_id_for = set()
+    context = ok(run_skill.main(manifest_path=str(manifest), resume=True))
+
+    assert context["complete"] is True
+    assert run_skill.host.exports == 4
 
 
 def test_resume_does_not_need_the_template_again(run_skill, media_dir, tmp_path):

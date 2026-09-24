@@ -28,7 +28,7 @@ meant to be reused verbatim rather than re-designed per caller.
 from __future__ import annotations
 
 import math
-import os
+import posixpath
 from typing import Any
 
 # Bumped whenever the meaning of a field changes. A receipt without this key is
@@ -124,11 +124,18 @@ def _require_number(source: dict[str, Any], key: str, where: str) -> float:
 def _normalize_path(value: str) -> str:
     """Fold path spelling so an honest host is not rejected over style.
 
-    The host and the adapter do not agree on separators or drive-letter case,
-    and a relative path resolves against each side's own working directory, so
-    both sides go through the same fold before they are compared.
+    Deliberately POSIX-based rather than ``os.path``-based. A CapCut host
+    reports Windows- or macOS-style paths, and ``os.path`` is ``posixpath`` on
+    the Linux runners: there ``\\`` is an ordinary character, ``.`` components
+    do not fold, and drive-letter case is significant, so two spellings of one
+    file compare equal on Windows and unequal on Linux. Folding through
+    ``posixpath`` makes the verdict identical on every platform.
+
+    ``abspath`` is intentionally not used: it resolves a relative path against
+    the *adapter's* working directory, which is not the host's, so it invents a
+    prefix neither side meant. ``normpath`` folds ``.`` and ``..`` without one.
     """
-    return os.path.normcase(os.path.abspath(value))
+    return posixpath.normpath(value.replace("\\", "/")).lower()
 
 
 def receipt_requested(params: Any) -> bool:

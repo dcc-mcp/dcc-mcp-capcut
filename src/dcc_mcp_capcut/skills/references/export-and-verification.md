@@ -144,10 +144,12 @@ Two rules apply to every opted-in call, including the read-only one:
   for is not evidence. It gets its own error text rather than the mutation
   wording, since "post-operation readback" points the wrong way for a poll.
 - When the result also carries an `output_path`, the receipt's `path` must
-  describe that same file. Paths are compared after `os.path.normcase` +
-  `os.path.abspath`, so separator style, drive-letter case and relative paths
-  do not reject an honest host — but a stale probe from an earlier render, or
-  the previous item in a batch, cannot stand in for this one.
+  describe that same file. Paths are folded before comparison — backslashes are
+  treated as separators, `.` and `..` components collapse, and case is ignored
+  — so spelling does not reject an honest host, but a stale probe from an
+  earlier render, or the previous item in a batch, cannot stand in. The fold is
+  platform-independent: it does not use `os.path`, which would make the same
+  two spellings compare equal on Windows and unequal on a Linux runner.
 
 The adapter never synthesises a receipt and never probes the file itself:
 duration and stream facts come from a probe the **host** runs (`ffprobe` or an

@@ -25,6 +25,7 @@ import pytest
 from dcc_mcp_capcut.contracts import validate_host_result
 from dcc_mcp_capcut.export_receipt import (
     EXPORT_RECEIPT_ACTIONS,
+    _normalize_path,
     receipt_requested,
     validate_export_receipt,
 )
@@ -298,6 +299,50 @@ def test_path_binding_is_not_rejected_over_spelling():
     assert (
         validate_host_result("get_export_status", result, params={"verify_output": True}) is result
     )
+
+
+# --- path folding must not depend on the platform running the test ----------
+
+# Windows-style spellings a CapCut host really emits. All of them must fold to
+# the same value everywhere, including under posixpath on the Linux runners.
+WINDOWS_SPELLINGS = [
+    "C:/out/vlog.mp4",
+    "c:/out/vlog.mp4",
+    "C:\\out\\vlog.mp4",
+    "c:\\out\\vlog.mp4",
+    "C:/out/./vlog.mp4",
+    "c:\\out\\.\\vlog.mp4",
+    "C:/out/sub/../vlog.mp4",
+    "C:/OUT/vlog.mp4",
+]
+
+
+@pytest.mark.parametrize("spelling", WINDOWS_SPELLINGS)
+def test_path_folding_is_platform_independent(spelling):
+    # Regression: os.path.normcase+abspath is ntpath on Windows and posixpath
+    # on Linux, where a backslash is an ordinary character and "." does not
+    # fold -- so this passed locally and failed on 4 CI lanes. Pinned against
+    # the literal expected value so it cannot drift with the platform.
+    assert _normalize_path(spelling) == "c:/out/vlog.mp4"
+
+
+@pytest.mark.parametrize("spelling", WINDOWS_SPELLINGS)
+def test_paths_that_differ_only_in_spelling_compare_equal(spelling):
+    assert _normalize_path(spelling) == _normalize_path("C:/out/vlog.mp4")
+
+
+def test_paths_that_name_different_files_stay_unequal():
+    # The fold must not be so loose that a wrong artifact slips through.
+    left = _normalize_path("C:/out/vlog.mp4")
+    for other in ("C:/out/vlog-2.mp4", "C:/other/vlog.mp4", "C:/out/vlog.mov"):
+        assert left != _normalize_path(other)
+
+
+def test_relative_paths_fold_without_a_cwd_prefix():
+    # abspath would resolve these against the adapter's cwd, which is not the
+    # host's, so normpath folds them instead.
+    assert _normalize_path("./out/vlog.mp4") == _normalize_path("out/vlog.mp4")
+    assert _normalize_path("out\\vlog.mp4") == _normalize_path("out/vlog.mp4")
 
 
 def test_path_binding_is_skipped_when_the_result_carries_no_output_path():

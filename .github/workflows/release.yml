@@ -76,3 +76,68 @@ jobs:
         run: |
           mapfile -d '' artifacts < <(find dist -maxdepth 1 -type f -print0 | sort -z)
           gh release upload "$RELEASE_TAG" "${artifacts[@]}" SHA256SUMS
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [release-please, artifacts]
+    if: needs.release-please.outputs.release_created == 'true'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dcc-mcp-capcut
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+      RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+    steps:
+      # Check out the exact revision release-please resolved, not the mutable
+      # tag: otherwise the wheel published to PyPI and the one attached to the
+      # GitHub Release come from two independent builds with nothing proving
+      # they share a revision.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release identity and version
+        env:
+          EXPECTED_VERSION: ${{ needs.release-please.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release target must be a canonical vMAJOR.MINOR.PATCH tag." >&2
+            exit 1
+          }
+          export EXPECTED_VERSION="${RELEASE_TAG#v}"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          expected = os.environ["EXPECTED_VERSION"]
+          manifest = json.loads(Path(".release-please-manifest.json").read_text(encoding="utf-8"))["."]
+          source = Path("pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', source, re.MULTILINE)
+          if match is None or manifest != expected or match.group(1) != expected:
+              raise SystemExit("Checked-out package version does not match the release target.")
+          PY
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - name: Build package
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Publish to PyPI with trusted publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          verbose: true
+          print-hash: true

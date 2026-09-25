@@ -90,10 +90,15 @@ jobs:
       id-token: write
     env:
       RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+      RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
     steps:
-      - uses: actions/checkout@v6
+      # Check out the exact revision release-please resolved, not the mutable
+      # tag: otherwise the wheel published to PyPI and the one attached to the
+      # GitHub Release come from two independent builds with nothing proving
+      # they share a revision.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ needs.release-please.outputs.tag }}
+          ref: ${{ needs.release-please.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify release identity and version
@@ -102,6 +107,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Release target must be a canonical vMAJOR.MINOR.PATCH tag." >&2
             exit 1
@@ -121,7 +128,7 @@ jobs:
               raise SystemExit("Checked-out package version does not match the release target.")
           PY
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
       - name: Build package

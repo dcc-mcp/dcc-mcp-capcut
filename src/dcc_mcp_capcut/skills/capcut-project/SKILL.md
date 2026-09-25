@@ -5,7 +5,7 @@ license: MIT
 compatibility: "CapCut Desktop; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.4.0", layer: domain, stage: scene, tags: "capcut, project, video", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.5.0", layer: domain, stage: scene, tags: "capcut, project, video", tools: tools.yaml}  # x-release-please-version
 ---
 
 Project lifecycle and canvas settings. Call `inspect_project` before any

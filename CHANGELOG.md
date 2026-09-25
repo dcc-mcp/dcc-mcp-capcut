@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.4.0...v0.5.0) (2026-09-25)
+
+
+### Features
+
+* **handoff:** add agent interface descriptors and the upstream handoff format ([#32](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/32)) ([d2ac9a8](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/d2ac9a8c5a6d667885cad8c26fa17c0339d7dfb5))
+
+
+### Bug Fixes
+
+* **batch:** keep what a resume learns before it refuses to continue ([58e1f52](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/58e1f52f7d00c9f451d7383614343b2055d112ed))
+* **batch:** settle an orphan the host cannot describe as one item's failure ([a430eaa](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/a430eaad344024e6b03e75aee7394299200e1f53))
+* **handoff:** close three P3 gaps in the descriptors, the index and dispatch ([398fe6b](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/398fe6b57fb10e82469be2084f960141f13a0905))
+* **verify:** report duplicate archive members without hiding other problems ([0ecf9bb](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/0ecf9bbebcee1a0af45c5f583d359b9a46292df9))
+
 ## [0.4.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.3.0...v0.4.0) (2026-09-24)
 
 

@@ -5,7 +5,7 @@ license: MIT
 compatibility: "CapCut Desktop; dcc-mcp-core 0.20.21+"
 allowed-tools: Python
 metadata:
-  dcc-mcp: {dcc: capcut, version: "0.4.0", layer: domain, stage: delivery, tags: "capcut, batch, template, render", tools: tools.yaml}  # x-release-please-version
+  dcc-mcp: {dcc: capcut, version: "0.5.0", layer: domain, stage: delivery, tags: "capcut, batch, template, render", tools: tools.yaml}  # x-release-please-version
 ---
 
 Batch production. The other skills edit one timeline; this one delivers many.

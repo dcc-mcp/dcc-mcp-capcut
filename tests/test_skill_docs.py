@@ -35,6 +35,7 @@ REFERENCE_FILES = (
     "export-and-verification.md",
     "host-boundary.md",
     "host-platforms.md",
+    "pixel-execution.md",
     "troubleshooting.md",
 )
 

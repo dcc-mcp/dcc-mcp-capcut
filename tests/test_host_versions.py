@@ -20,6 +20,7 @@ from dcc_mcp_capcut.hosts import (
     find_version,
     get_provider,
     normalize_version,
+    verified_builds,
     version_support,
     versions_for,
 )
@@ -42,12 +43,38 @@ def test_the_acceptance_record_is_in_the_matrix():
 
 
 def test_the_matrix_is_keyed_by_platform_edition_and_version():
-    """Every row is addressable, so a provider can ask for its own builds only."""
+    """Every row is addressable, so a provider can ask for its own builds only.
+
+    A platform/edition pair may now carry more than one build -- Windows CapCut
+    lists both the acceptance-verified build and a later one driven live
+    through dcc-cua -- so the invariant is that a row is addressable by its
+    *version*, and that the pair's list is ordered verified builds first.
+    """
     for entry in SUPPORTED_HOST_VERSIONS:
         assert entry.platform and entry.edition and entry.version
-        assert versions_for(entry.platform, entry.edition) == (entry,)
+        assert find_version(entry.platform, entry.edition, entry.version) == entry
+        listed = versions_for(entry.platform, entry.edition)
+        assert entry in listed
+        assert listed == tuple(sorted(listed, key=lambda item: (not item.verified, item.version)))
     assert versions_for("windows", "jianyingpro") == ()
     assert versions_for("macos", "capcut") == ()
+
+
+def test_the_pixel_route_lists_the_build_it_was_driven_on():
+    """The live-driven 9.5.0.4050 build is listed, but not as acceptance-verified.
+
+    Pixel execution needs the build to appear in the matrix, because a
+    coordinate is only meaningful for the build it was measured on. It must not
+    be recorded as verified, though: it was driven through dcc-cua, which is a
+    weaker claim than the native Qt probe acceptance 9.4.0.4015 passed.
+    """
+    entry = find_version("windows", "capcut", "9.5.0.4050")
+    assert entry is not None
+    assert entry.verified is False
+    assert entry.status == KNOWN
+    assert entry not in verified_builds()
+    # The reason it is not verified is recorded, or it cannot be re-checked.
+    assert "node_count=1" in entry.notes
 
 
 @pytest.mark.parametrize(

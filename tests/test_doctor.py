@@ -777,3 +777,77 @@ def test_the_asr_check_never_breaks_the_preflight(asr_env):
         check = asr_env(value)
         assert check.status in doctor.STATUSES
         assert check.status != doctor.FAIL
+
+
+# --------------------------------------------------------------------------
+# pixel execution route
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cua_env(pin_platform, monkeypatch, tmp_path):
+    """Pin the platform and the build the version guard will read."""
+
+    def _setup(platform: str, version: str | None, *, install: bool = True):
+        pin_platform(platform)
+        import dcc_mcp_capcut.hosts.windows as windows_host
+
+        monkeypatch.setattr(windows_host, "read_pe_version", lambda path: version)
+        if install:
+            tree = tmp_path / "CapCut" / "Apps"
+            tree.mkdir(parents=True, exist_ok=True)
+            (tree / "CapCut.exe").write_bytes(b"MZ")
+            (tree / "resources.pak").write_bytes(b"pak")
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        return doctor.check_cua_execution()
+
+    return _setup
+
+
+def test_the_execution_check_is_registered(pin_platform):
+    assert "cua_execution" in [name for name, _ in doctor.CHECKS]
+
+
+def test_execution_check_reports_a_pinned_build(cua_env):
+    """A listed build is one coordinates may be measured against."""
+    check = cua_env("windows", "9.5.0.4050")
+    assert check.status == doctor.OK
+    assert "9.5.0.4050" in check.summary
+    assert check.detail["allowed"] is True
+    assert check.detail["install_tree"]["file_count"] == 2
+
+
+def test_execution_check_warns_on_an_unpinned_build(cua_env):
+    """Unpinned is a warning, not a failure: the route is a last resort."""
+    check = cua_env("windows", "10.9.9.9999")
+    assert check.status == doctor.WARN
+    assert check.detail["allowed"] is False
+    assert check.hint
+
+
+def test_execution_check_never_fails(cua_env):
+    """A last-resort route must never be reported as a broken install."""
+    for version in ("9.5.0.4050", "10.9.9.9999", None):
+        check = cua_env("windows", version)
+        assert check.status in doctor.STATUSES
+        assert check.status != doctor.FAIL
+
+
+def test_execution_check_skips_on_linux(cua_env):
+    check = cua_env("linux", None)
+    assert check.status == doctor.SKIP
+    assert check.detail["reason"]
+
+
+def test_execution_check_skips_when_no_host_is_installed(cua_env):
+    check = cua_env("windows", None, install=False)
+    assert check.status == doctor.SKIP
+
+
+def test_execution_check_records_an_install_tree_fingerprint(cua_env):
+    """The fingerprint is what makes a later in-place upgrade detectable."""
+    check = cua_env("windows", "9.5.0.4050")
+    tree = check.detail["install_tree"]
+    assert tree["exists"] is True
+    assert len(tree["digest"]) == 64
+    assert tree["truncated"] is False

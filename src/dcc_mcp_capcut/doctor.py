@@ -389,6 +389,67 @@ def check_dcc_cua() -> Check:
     )
 
 
+def check_cua_execution() -> Check:
+    """Report whether the pixel execution route is usable here, and fingerprint the install tree.
+
+    This is evidence, never a gate. It never fails, because the route is a
+    last resort rather than a prerequisite: the adapter binds and starts without
+    it, and a failed preflight must not be reported as a broken install.
+
+    Two facts are additive over the neighbouring checks. ``host_version`` grades
+    the build for *binding*; this grades it for *pixel execution*, which is
+    stricter because a coordinate is only meaningful on the build it was measured
+    on. And it records an install-tree fingerprint, so a later drift -- CapCut
+    upgrades itself in place -- is detectable rather than merely suspected.
+    """
+    from .cua import guards
+
+    provider = get_provider()
+    if not provider.supported:
+        return Check(
+            "cua_execution",
+            SKIP,
+            f"pixel execution is unsupported on {provider.label}",
+            {"platform": provider.name, "reason": provider.unsupported_reason},
+            hint=None,
+        )
+
+    guard = guards.guard_host_version()
+    if guard.status == guards.NO_HOST:
+        return Check(
+            "cua_execution",
+            SKIP,
+            "no host installation found; the pixel route has no build to grade",
+            {"platform": provider.name, "status": guard.status},
+            hint=None,
+        )
+
+    tree = guards.snapshot_install_tree()
+    detail = {
+        "platform": provider.name,
+        "version_status": guard.status,
+        "version": guard.version,
+        "edition": guard.edition,
+        "allowed": guard.allowed,
+        "install_tree": tree.as_dict(),
+    }
+    if guard.status == guards.PINNED:
+        return Check(
+            "cua_execution",
+            OK,
+            f"pixel execution is pinned to {guard.edition} {guard.version}",
+            detail,
+            hint=None,
+        )
+    return Check(
+        "cua_execution",
+        WARN,
+        f"pixel execution is unpinned on {guard.edition} {guard.version or 'unknown'}",
+        detail,
+        hint=guard.hint,
+    )
+
+
 def _bridge_port() -> int:
     try:
         port = int(os.environ.get("DCC_MCP_CAPCUT_BRIDGE_PORT", ""))
@@ -574,6 +635,7 @@ CHECKS: tuple[tuple[str, Callable[[], Check]], ...] = (
     ("capcut_executable", check_capcut_executable),
     ("host_version", check_host_version),
     ("dcc_cua", check_dcc_cua),
+    ("cua_execution", check_cua_execution),
     ("bridge_port", check_bridge_port),
     ("bridge_token", check_bridge_token),
     ("panel_files", check_panel_files),

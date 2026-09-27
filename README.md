@@ -87,6 +87,39 @@ while every host action fails immediately.
 Verify with `GET /health` on the bridge URL, and set
 `DCC_MCP_CAPCUT_BRIDGE_TOKEN` to a per-user secret for production use.
 
+## Pixel execution (last resort)
+
+CapCut renders as a single opaque QML canvas — the window inventory reports one
+node with no children, and `dcc-cua` treats the missing accessibility provider
+as permanent for the window class — so semantic automation is closed. For what
+the panel cannot reach, `dcc_mcp_capcut.cua` drives one typed action as
+`exact PID/HWND binding -> pixel snapshot -> coordinate input -> verify`.
+
+It is deliberately the last route, not the first: the bridge and the panel stay
+the typed, auditable path. Two rules make the route honest:
+
+- **`unknown` is not success.** Verification fails closed when a predicate cannot
+  be evaluated, which is the common case for element predicates on this canvas.
+- **A changed pixel is not a verified edit.** `pixel_changed` is reported
+  alongside the verdict, never folded into it: a dialog appearing and the
+  requested edit landing look identical from a pixel digest.
+
+Coordinates are build-specific, so the version guard refuses to run against a
+build the support matrix does not list unless `allow_unverified=True` is passed.
+The route is **not headless** — unattended means unattended on an interactive
+Windows or macOS desktop; Linux CI is out of scope. Input is delivered
+`background` first and escalates to `foreground` only on the driver's
+`background_unavailable` answer, never pre-emptively.
+
+CapCut also upgrades itself in place (a `9.5.0.4050` launch was observed
+deleting the `9.4.0.4015` install tree), so snapshot the install tree before
+launch and diff it afterwards; a `host_replaced` diff means rebind, because a
+recycled PID can name a different window.
+
+See [`src/dcc_mcp_capcut/skills/references/pixel-execution.md`](src/dcc_mcp_capcut/skills/references/pixel-execution.md)
+for the full contract, and `dcc-mcp-capcut-doctor --json` for the
+`cua_execution` evidence check.
+
 ## Vlog demo
 
 `demo/assets.json` records NASA/JPL public-domain source pages and attribution

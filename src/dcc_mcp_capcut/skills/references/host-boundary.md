@@ -69,6 +69,13 @@ CLI. UI verification must go through the project-owned `dcc-cua` / `ui-control`
 route with the exact PID and HWND; never substitute a generic computer-use
 provider.
 
+For input delivery there is a second, last-resort route: `dcc_mcp_capcut.cua`
+drives one typed action as `binding -> pixel snapshot -> coordinate input ->
+verify`. It exists because CapCut renders as a single opaque QML canvas with no
+accessibility provider, and it is available only on an interactive Windows or
+macOS desktop. See `pixel-execution.md` for what it can prove and what it
+refuses.
+
 ## Bridge contract
 
 | Variable | Default | Meaning |
@@ -106,6 +113,7 @@ CapCut manifest is stale, or when handshake metadata is absent. The plain
 ## See also
 
 - `host-platforms.md` — the per-platform support matrix and provider contract.
+- `pixel-execution.md` — the last-resort pixel route and its limits.
 - `dependencies-and-notices.md` — third-party licenses and redistribution facts.
 - `export-and-verification.md` — the post-operation readback contract.
 - `troubleshooting.md` — symptom to cause to remediation.

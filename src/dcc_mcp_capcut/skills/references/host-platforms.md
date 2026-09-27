@@ -81,9 +81,17 @@ the build, the verified builds, and how to get the version added to the matrix.
 Only two states skip — a platform with no host, and a platform where nothing is
 installed yet, because there is then no build to grade.
 
-Currently verified: Windows CapCut `9.4.0.4015` (Qt `6.2.2`). No macOS or
-剪映专业版 build has been acceptance-tested yet, so those rows are empty rather
-than assumed.
+Currently verified: Windows CapCut `9.4.0.4015` (Qt `6.2.2`). Windows CapCut
+`9.5.0.4050` is **listed but not verified**: it was driven live through
+`dcc-cua`, which is a weaker claim than the native Qt probe acceptance. No macOS
+or 剪映专业版 build has been acceptance-tested yet, so those rows are empty
+rather than assumed.
+
+Listing a build matters more for pixel execution than for binding. A coordinate
+is a fact about one rendered frame — a function of the build, the display scale
+and the window size — so `cua` refuses to replay coordinates against a build the
+matrix does not list unless the caller passes `allow_unverified=True`. See
+`pixel-execution.md`.
 
 ## Consent is unchanged
 

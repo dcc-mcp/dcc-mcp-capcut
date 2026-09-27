@@ -88,9 +88,28 @@ SUPPORTED_HOST_VERSIONS: tuple[HostVersion, ...] = (
             "See native/qt-probe/README.md."
         ),
     ),
+    HostVersion(
+        platform="windows",
+        edition="capcut",
+        version="9.5.0.4050",
+        qt_version="6.2.2",
+        # Listed, not verified: this build was driven live through dcc-cua, but
+        # it has not passed the native Qt probe acceptance that 9.4.0.4015 did.
+        verified=False,
+        notes=(
+            "Driven live through dcc-cua: the window binds exactly (PID/HWND), "
+            "input delivery works, and the UI is one opaque QML canvas -- "
+            "UIA reports node_count=1 with zero children, so the semantic route "
+            "is closed and automation is pixel/coordinate grade. Launching this "
+            "build deletes the previous 9.4.0.4015 install tree, so the install"
+            " directory is not a stable fact across an upgrade."
+        ),
+    ),
 )
 
 #: Convenience handle for the build acceptance has actually covered so far.
+#: This stays the *first* entry on purpose: the table is ordered verified
+#: builds first, and callers treat index 0 as the acceptance baseline.
 VERIFIED_BUILD = SUPPORTED_HOST_VERSIONS[0]
 
 

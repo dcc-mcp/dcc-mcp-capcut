@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ..bootstrap import CapCutBindingError, select_capcut_window
@@ -252,8 +253,12 @@ def snapshot(
     width = int(space.get("width", 0) or 0)
     height = int(space.get("height", 0) or 0)
     image = payload.get("image") or payload.get("screenshot") or payload.get("png")
-    digest = _digest(payload.get("image_base64") or payload.get("base64") or image)
     path = payload.get("output") or payload.get("image_path") or output
+    # Try the inline pixels first and fall back to the file the driver wrote,
+    # so change detection works whichever shape the driver returns.
+    digest = _digest(payload.get("image_base64") or payload.get("base64") or image)
+    if digest is None and path:
+        digest = _digest_file(path)
     return CuaSnapshot(
         binding=binding,
         observation_width=width,
@@ -265,12 +270,34 @@ def snapshot(
 
 
 def _digest(payload: Any) -> str | None:
-    """A stable digest of the pixels, for change detection between captures."""
+    """A stable digest of the pixels, for change detection between captures.
+
+    Accepts either shape the driver may return: the pixels inline, or a path to
+    the file it wrote. Change detection is advertised as a real signal, so it
+    must not silently go dark just because the driver chose the other shape --
+    and an unreadable file degrades to None the same way a missing inline field
+    does, which the caller already reports honestly.
+    """
     if payload is None:
         return None
     if isinstance(payload, bytes):
         return hashlib.sha256(payload).hexdigest()
+    if isinstance(payload, str):
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _digest_file(path: str | Path) -> str | None:
+    """Hash the pixels a driver wrote to disk, for change detection.
+
+    Some responses carry only a path instead of inline bytes. An unreadable or
+    absent file yields None -- the same fact as a missing inline field, which the
+    caller already reports honestly rather than inferring "nothing changed".
+    """
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return None
 
 
 def act(
@@ -475,6 +502,18 @@ def verify(
     if not results:
         raise CuaVerificationError(
             "dcc-cua returned no predicate results; the final state is unproven"
+        )
+    # A verdict count that does not match the predicates sent is a driver that
+    # evaluated less than was asked -- most likely by silently truncating. Those
+    # missing predicates never reach the unknown list, so without this check a
+    # partly-evaluated verify reports itself fully proven: "unobserved"
+    # laundered into "proven", which is the one thing this layer exists to
+    # prevent. The input-side cap is only half the guard; this is the other half.
+    if len(results) != len(predicates):
+        raise CuaVerificationError(
+            f"dcc-cua evaluated {len(results)} of {len(predicates)} predicates; "
+            f"{len(predicates) - len(results)} were never evaluated, so the final "
+            "state is unproven"
         )
 
     verdicts: list[dict[str, Any]] = []

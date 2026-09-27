@@ -182,28 +182,54 @@ class InstallTreeDiff:
     changed: tuple[str, ...] = ()
 
     @property
+    def roots_match(self) -> bool:
+        """True when both snapshots describe the same install root.
+
+        Two different roots are not a diff at all -- the install moved. Callers
+        rely on this to tell "the tree drifted" from "the tree is somewhere
+        else now", so it is part of the result rather than something each caller
+        has to rediscover.
+        """
+        return bool(self.before.root) and self.before.root == self.after.root
+
+    @property
     def unchanged(self) -> bool:
-        """True when both trees were read and neither reports a difference."""
+        """True when both trees were read, at one root, and nothing differs.
+
+        A changed root is not "unchanged": the install directory itself moved,
+        which is a stronger statement than any file-level diff.
+        """
         return (
             self.before.exists
             and self.after.exists
+            and self.roots_match
             and not (self.added or self.removed or self.changed)
         )
 
     @property
     def host_replaced(self) -> bool:
-        """True when the install tree vanished or was largely removed.
+        """True when the install tree vanished, moved, or was largely removed.
 
         This is the shape of the observed self-upgrade: CapCut deleted the
         previous version's install directory during launch. A binding taken
-        before that event names a process that no longer exists, so the caller
+        before that event names a process that may no longer exist, so the caller
         must rebind rather than trust the ids it holds.
+
+        A different root counts as a replacement -- the install did not stay put,
+        which is exactly the fact that invalidates a binding. The removal
+        threshold is strict majority, so a tree that lost only a few files is
+        drift, not a replacement. A single-file tree cannot express "largely
+        removed" at all, so it falls back to whether the file itself survived.
         """
         if not self.after.exists or not self.before.exists:
             return True
+        if not self.roots_match:
+            return True
         if not self.before.file_count:
             return False
-        return len(self.removed) >= self.before.file_count // 2
+        if self.before.file_count < 2:
+            return bool(self.removed)
+        return len(self.removed) > self.before.file_count // 2
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -213,6 +239,7 @@ class InstallTreeDiff:
             "removed": list(self.removed),
             "changed": list(self.changed),
             "unchanged": self.unchanged,
+            "roots_match": self.roots_match,
             "host_replaced": self.host_replaced,
         }
 

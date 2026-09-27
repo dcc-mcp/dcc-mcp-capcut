@@ -38,7 +38,14 @@ from typing import Any, Mapping, Sequence
 
 from . import actions, cli, guards, surface
 from .errors import CuaError, CuaVerificationError
-from .guards import InstallTreeDiff, InstallTreeGuard, VersionGuard, guard_host_version
+from .guards import (
+    InstallTreeDiff,
+    InstallTreeGuard,
+    VersionGuard,
+    guard_host_version,
+    install_root,
+    snapshot_install_tree,
+)
 from .surface import CuaBinding, CuaSnapshot, CuaVerification, bind, snapshot, verify
 
 __all__ = [

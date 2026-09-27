@@ -320,3 +320,61 @@ def test_bind_and_check_returns_both_facts(windows, tmp_path, monkeypatch, insta
 def test_get_provider_defaults_to_the_running_platform():
     """Guards a regression: the guard must not silently grade another platform."""
     assert get_provider().name in {WINDOWS, MACOS, LINUX}
+
+
+def test_different_roots_are_a_replacement_not_a_clean_diff(windows, tmp_path):
+    """An install that moved is not 'unchanged' -- the binding is invalid either way."""
+    _write_install(tmp_path / "one")
+    _write_install(tmp_path / "two")
+    before = guards.snapshot_install_tree(tmp_path / "one")
+    after = guards.snapshot_install_tree(tmp_path / "two")
+    diff = guards.diff_install_tree(before, after)
+    assert diff.roots_match is False
+    assert diff.unchanged is False
+    # A moved install invalidates the binding just as a deleted one does.
+    assert diff.host_replaced is True
+
+
+def test_roots_match_reports_the_same_root_as_matching(windows, tmp_path):
+    _write_install(tmp_path)
+    root = tmp_path / "CapCut"
+    diff = guards.diff_install_tree(
+        guards.snapshot_install_tree(root), guards.snapshot_install_tree(root)
+    )
+    assert diff.roots_match is True
+    assert diff.unchanged is True
+
+
+def test_a_single_file_tree_with_nothing_removed_is_not_a_replacement(windows, tmp_path):
+    """A majority threshold of zero would call an untouched tree 'replaced'."""
+    tree = tmp_path / "CapCut" / "Apps"
+    tree.mkdir(parents=True)
+    (tree / "CapCut.exe").write_bytes(b"MZ")
+    root = tmp_path / "CapCut"
+    snapshot = guards.snapshot_install_tree(root)
+    assert snapshot.file_count == 1
+    diff = guards.diff_install_tree(snapshot, snapshot)
+    assert diff.host_replaced is False
+
+
+def test_a_single_file_tree_whose_file_vanished_is_a_replacement(windows, tmp_path):
+    tree = tmp_path / "CapCut" / "Apps"
+    tree.mkdir(parents=True)
+    (tree / "CapCut.exe").write_bytes(b"MZ")
+    root = tmp_path / "CapCut"
+    before = guards.snapshot_install_tree(root)
+    (tree / "CapCut.exe").unlink()
+    assert (
+        guards.diff_install_tree(before, guards.snapshot_install_tree(root)).host_replaced is True
+    )
+
+
+def test_host_replaced_needs_a_strict_majority_removed(windows, tmp_path):
+    """Losing a minority of files is drift, not a replaced install."""
+    _write_install(tmp_path)
+    root = tmp_path / "CapCut"
+    before = guards.snapshot_install_tree(root)
+    (root / "Apps" / "resources.pak").unlink()
+    diff = guards.diff_install_tree(before, guards.snapshot_install_tree(root))
+    assert diff.removed == ("Apps/resources.pak",)
+    assert diff.host_replaced is False

@@ -554,3 +554,90 @@ def test_the_predicate_cap_allows_a_mixed_batch_that_fits():
     """Four dual expectations expand to eight, which is within the cap."""
     mixed = [{"window_exists": True, "element_exists": {"role": "button"}}] * 4
     assert len(surface.build_expectations(mixed)) == surface.MAX_PREDICATES
+
+
+# --------------------------------------------------------------------------
+# a driver that evaluates less than it was sent
+# --------------------------------------------------------------------------
+
+
+def test_a_verdict_count_below_the_predicate_count_fails_closed(windows, fake_cua, binding):
+    """Evaluated less than asked is unproven, never proven.
+
+    The missing predicates never reach the unknown list, so without this check a
+    partly-evaluated verify launders "unobserved" into "proven" -- the exact
+    failure this layer exists to prevent. The input-side cap is only half the
+    guard; this is the output half.
+    """
+    fake_cua.respond({"success": True, "results": [{"status": "satisfied", "name": "window"}]})
+    with pytest.raises(CuaVerificationError, match="evaluated 1 of 2 predicates"):
+        surface.verify(
+            binding,
+            [
+                {"window_exists": True},
+                {"window_bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            ],
+        )
+
+
+def test_a_full_verdict_count_with_one_unknown_still_fails(windows, fake_cua, binding):
+    """The count check must not mask the unknown-is-not-success rule."""
+    fake_cua.respond(
+        {"success": True, "results": [{"status": "satisfied"}, {"status": "unknown", "name": "e"}]}
+    )
+    with pytest.raises(CuaVerificationError, match="unknown"):
+        surface.verify(
+            binding,
+            [
+                {"window_exists": True},
+                {"window_bounds": {"x": 0, "y": 0, "width": 10, "height": 10}},
+            ],
+        )
+
+
+def test_a_matching_verdict_count_all_still_passes(windows, fake_cua, binding):
+    """The new check must not reject a complete, fully satisfied verification."""
+    fake_cua.respond(
+        {"success": True, "results": [{"status": "satisfied"}, {"status": "satisfied"}]}
+    )
+    verdict = surface.verify(
+        binding,
+        [{"window_exists": True}, {"window_bounds": {"x": 0, "y": 0, "width": 10, "height": 10}}],
+    )
+    assert verdict.ok is True
+    assert verdict.proven is True
+
+
+# --------------------------------------------------------------------------
+# pixels delivered as a file rather than inline
+# --------------------------------------------------------------------------
+
+
+def test_a_path_only_response_still_yields_a_digest(windows, fake_cua, binding, tmp_path):
+    """Change detection must not go dark because the driver wrote a file instead."""
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"PIXELS-BEFORE")
+    fake_cua.respond(
+        {
+            "success": True,
+            "coordinate_space": {"width": 10, "height": 10},
+            "image_path": str(shot),
+        }
+    )
+    first = surface.snapshot(binding)
+    assert first.content_digest is not None
+    shot.write_bytes(b"PIXELS-AFTER")
+    second = surface.snapshot(binding)
+    assert second.content_digest != first.content_digest
+
+
+def test_an_unreadable_path_degrades_to_no_digest(windows, fake_cua, binding, tmp_path):
+    """A file that cannot be read is the same fact as a missing inline field."""
+    fake_cua.respond(
+        {
+            "success": True,
+            "coordinate_space": {"width": 10, "height": 10},
+            "image_path": str(tmp_path / "does-not-exist.png"),
+        }
+    )
+    assert surface.snapshot(binding).content_digest is None

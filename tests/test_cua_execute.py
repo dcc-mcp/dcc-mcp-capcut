@@ -436,3 +436,21 @@ def test_a_failed_verification_carries_the_receipt(windows, fake_cua, binding):
 def test_a_verification_error_without_an_attached_receipt_is_still_none():
     """The attribute always exists, so a caller can branch without hasattr."""
     assert CuaVerificationError("nope").execution is None
+
+
+def test_the_package_exports_everything_its_all_promises():
+    """A broken __all__ only shows up under import *, which is what docs imply."""
+    from dcc_mcp_capcut import cua
+
+    for name in cua.__all__:
+        if name in {"actions", "cli", "guards", "surface"}:
+            continue
+        assert hasattr(cua, name), f"cua.__all__ promises {name!r}, which does not exist"
+
+
+def test_import_star_actually_works():
+    """The public surface must be importable the way __all__ advertises it."""
+    namespace: dict = {}
+    exec("from dcc_mcp_capcut.cua import *", namespace)
+    assert callable(namespace["snapshot_install_tree"])
+    assert callable(namespace["install_root"])

@@ -49,6 +49,10 @@ UNKNOWN = "unknown"
 #: Expectations this layer will translate into driver predicates.
 EXPECTATION_KEYS = ("window_exists", "window_bounds", "element_exists")
 
+#: The most predicates the driver accepts in one verify call. Enforced on the
+#: *expanded* list -- see :func:`build_expectations`.
+MAX_PREDICATES = 8
+
 
 @dataclass(frozen=True)
 class CuaBinding:
@@ -409,10 +413,6 @@ def build_expectations(expectations: Sequence[Mapping[str, Any]]) -> list[dict[s
     """Translate adapter expectations into driver predicates."""
     if not expectations:
         raise CuaActionRejected("verification needs at least one expectation")
-    if len(expectations) > 8:
-        # The driver caps a verify call at eight predicates, and silently
-        # truncating an operator's expectations would verify less than asked.
-        raise CuaActionRejected("at most 8 expectations are supported per verify call")
 
     predicates: list[dict[str, Any]] = []
     for expectation in expectations:
@@ -430,6 +430,15 @@ def build_expectations(expectations: Sequence[Mapping[str, Any]]) -> list[dict[s
                 predicates.append(predicate)
     if not predicates:
         raise CuaActionRejected("no verifiable expectation was supplied")
+    # Count predicates, not expectations. One expectation can expand into two --
+    # a window predicate and an element predicate -- so capping the input would
+    # still hand the driver more than it accepts, and silently truncating an
+    # operator's expectations would verify less than was asked.
+    if len(predicates) > MAX_PREDICATES:
+        raise CuaActionRejected(
+            f"these expectations expand to {len(predicates)} predicates; at most "
+            f"{MAX_PREDICATES} are supported per verify call"
+        )
     return predicates
 
 

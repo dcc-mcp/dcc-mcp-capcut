@@ -21,6 +21,8 @@ so the adapter can refuse to retry instead of hoping.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class CuaError(RuntimeError):
     """Base class for every failure raised by the execution adapter.
@@ -117,9 +119,19 @@ class CuaVerificationError(CuaError):
     are different facts and both are failures: a predicate the driver could not
     evaluate is not a predicate that passed, and reporting otherwise is how an
     unverified click gets recorded as a completed edit.
+
+    Carries the receipt for the run that failed to verify, attached by the
+    caller. The unproven path is the one where the residue matters most -- input
+    was already delivered, so the project may already have changed -- and an
+    operator told only "could not be verified" cannot tell what to inspect.
     """
 
     code = "cua_verification_error"
+
+    #: The :class:`~dcc_mcp_capcut.cua.CuaExecution` for the run that could not
+    #: be proven. ``None`` until the caller attaches it, so the attribute always
+    #: exists and a caller can branch without a ``hasattr``.
+    execution: Any = None
 
 
 class CuaNoAccessibility(CuaError):

@@ -150,3 +150,28 @@ def test_scroll_without_coordinates_still_needs_no_space():
     """Scroll is coordinate-ish, but a window-wide scroll has no target pixel."""
     payload = build_action("scroll", {"scroll_y": 5})
     assert payload["scroll_y"] == 5
+
+
+def test_scroll_with_coordinates_needs_the_frame_like_any_other_pixel():
+    """The invariant tracks addressing a pixel, not the action's name.
+
+    A window-wide scroll names no pixel; the moment it carries x/y it is
+    addressing one, and must be measured against the frame like a click is.
+    """
+    with pytest.raises(CuaActionRejected, match="observation_width"):
+        build_action("scroll", {"x": 5000, "y": 5000})
+    with pytest.raises(CuaActionRejected, match="observation_width"):
+        build_action("scroll", {"x": 1})
+
+
+def test_a_window_wide_scroll_still_needs_no_frame():
+    """No coordinates, no pixel to validate -- the original intent holds."""
+    assert build_action("scroll", {"scroll_y": 5}) == {"action": "scroll", "scroll_y": 5}
+    assert build_action("scroll", {"scroll_x": 1, "scroll_y": 2, "by": "line"})["by"] == "line"
+
+
+@pytest.mark.parametrize("action", ["click", "move", "right_click", "double_click", "scroll"])
+def test_coordinates_are_checked_inside_the_frame_for_every_pixel_action(action):
+    """No coordinate action, scroll included, may name a pixel outside the frame."""
+    with pytest.raises(CuaActionRejected, match="outside the captured frame"):
+        build_action(action, {"x": 1920, "y": 10}, **SPACE)

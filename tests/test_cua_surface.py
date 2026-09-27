@@ -535,3 +535,22 @@ def test_windows_provider_reports_supported_inventory(windows):
 def test_os_is_imported_for_the_crash_message_guard():
     """Keeps the module's imports honest about what it actually uses."""
     assert hasattr(os, "name")
+
+
+def test_the_predicate_cap_counts_predicates_not_expectations():
+    """One expectation can expand into two predicates, so cap the expansion.
+
+    Counting the input would hand the driver more than it accepts: eight dual
+    expectations are sixteen predicates.
+    """
+    dual = [{"window_exists": True, "element_exists": {"role": "button"}}] * 8
+    with pytest.raises(Exception, match="expand to 16 predicates"):
+        surface.build_expectations(dual)
+    # Eight single-predicate expectations still fit exactly.
+    assert len(surface.build_expectations([{"window_exists": True}] * 8)) == 8
+
+
+def test_the_predicate_cap_allows_a_mixed_batch_that_fits():
+    """Four dual expectations expand to eight, which is within the cap."""
+    mixed = [{"window_exists": True, "element_exists": {"role": "button"}}] * 4
+    assert len(surface.build_expectations(mixed)) == surface.MAX_PREDICATES

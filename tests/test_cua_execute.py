@@ -20,7 +20,7 @@ import pytest
 
 from dcc_mcp_capcut import cua
 from dcc_mcp_capcut.cua import cli, surface
-from dcc_mcp_capcut.cua.errors import CuaUnsupportedPlatform, CuaVerificationError
+from dcc_mcp_capcut.cua.errors import CuaError, CuaUnsupportedPlatform, CuaVerificationError
 from dcc_mcp_capcut.hosts import LINUX, WINDOWS
 
 INVENTORY = [
@@ -117,6 +117,35 @@ def windows(pin_platform):
 
 
 @pytest.fixture
+def host_build(monkeypatch, tmp_path):
+    """Pin the installed build the version guard reads.
+
+    The guard is part of ``execute()`` now, so a test that does not control it
+    inherits whatever CapCut happens to be on the machine running pytest --
+    which would make the suite red or green for reasons unrelated to the code.
+    """
+
+    def _pin(version: str | None, *, install: bool = True):
+        import dcc_mcp_capcut.hosts.windows as windows_host
+
+        monkeypatch.setattr(windows_host, "read_pe_version", lambda path: version)
+        if install:
+            tree = tmp_path / "CapCut" / "Apps"
+            tree.mkdir(parents=True, exist_ok=True)
+            (tree / "CapCut.exe").write_bytes(b"MZ")
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        return version
+
+    return _pin
+
+
+@pytest.fixture(autouse=True)
+def pinned_host(windows, host_build):
+    """Default every test to a listed build, so only guard tests opt out."""
+    return host_build("9.5.0.4050")
+
+
+@pytest.fixture
 def binding():
     return surface.CuaBinding(
         pid=4242,
@@ -128,7 +157,11 @@ def binding():
 
 
 def test_the_loop_runs_bind_snapshot_act_verify_in_order(windows, fake_cua, binding):
-    """The four steps the roadmap named, in the order that makes them meaningful."""
+    """The four steps the roadmap named, in the order that makes them meaningful.
+
+    Runs without a supplied binding, so it also proves the version guard did not
+    refuse: a build nobody measured coordinates on must not reach this far.
+    """
     fake_cua.script(
         list=[(INVENTORY, 0)],
         snapshot=[(FRAME, 0), ({**FRAME, "image_base64": "B"}, 0)],
@@ -305,3 +338,101 @@ def test_every_module_keeps_the_no_injection_red_line():
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
         for forbidden in ("WriteProcessMemory", "VirtualAllocEx", "CreateRemoteThread"):
             assert forbidden not in code, f"{name} must not inject into the host process"
+
+
+# --------------------------------------------------------------------------
+# the version guard is on the execute() path, not only in bind_and_check()
+# --------------------------------------------------------------------------
+
+
+def test_execute_refuses_an_unpinned_build(windows, host_build, fake_cua, binding):
+    """The guarantee the docs make is unconditional: execute() must grade first."""
+    host_build("10.9.9.9999")
+    with pytest.raises(CuaError, match="refusing to run pixel execution"):
+        cua.execute("click", {"x": 1, "y": 1}, binding=binding)
+    # Nothing was delivered, so nothing needs inspecting afterwards.
+    assert fake_cua.subcommands() == []
+
+
+def test_execute_refuses_an_unpinned_build_even_without_a_binding(windows, host_build, fake_cua):
+    """Binding is not the gate; the version verdict is."""
+    host_build("10.9.9.9999")
+    with pytest.raises(CuaError, match="refusing to run pixel execution"):
+        cua.execute("click", {"x": 1, "y": 1})
+    assert fake_cua.subcommands() == []
+
+
+def test_execute_refuses_when_no_host_is_installed(windows, host_build, fake_cua):
+    host_build(None, install=False)
+    with pytest.raises(CuaError, match="refusing to run pixel execution"):
+        cua.execute("click", {"x": 1, "y": 1})
+
+
+def test_allow_unverified_proceeds_on_an_unpinned_build(windows, host_build, fake_cua, binding):
+    """An explicit acknowledgement runs, and the receipt says it was unvalidated."""
+    host_build("10.9.9.9999")
+    fake_cua.script(snapshot=[(FRAME, 0), (FRAME, 0)], act=[({"success": True}, 0)])
+    result = cua.execute("click", {"x": 1, "y": 1}, binding=binding, allow_unverified=True)
+    assert any("unvalidated for this build" in note for note in result.notes)
+    assert result.as_dict()["version_guard"]["status"] == "unpinned"
+
+
+def test_the_receipt_records_the_version_verdict(windows, fake_cua, binding):
+    """A receipt should be self-describing about what it was admitted under."""
+    fake_cua.script(
+        snapshot=[(FRAME, 0), (FRAME, 0)],
+        act=[({"success": True}, 0)],
+        verify=[({"success": True, "results": [{"status": "satisfied"}]}, 0)],
+    )
+    result = cua.execute(
+        "click", {"x": 1, "y": 1}, binding=binding, expectations=[{"window_exists": True}]
+    )
+    guard = result.as_dict()["version_guard"]
+    assert guard["status"] == "pinned"
+    assert guard["version"] == "9.5.0.4050"
+    assert guard["allowed"] is True
+
+
+def test_bind_and_check_and_execute_agree_on_admissibility(
+    windows, host_build, monkeypatch, fake_cua
+):
+    """Two entry points, one verdict: they must not disagree about the build."""
+    host_build("10.9.9.9999")
+    monkeypatch.setattr(cua, "bind", lambda **kwargs: cua.CuaBinding(pid=1, window_handle=2))
+    with pytest.raises(CuaError):
+        cua.bind_and_check()
+    with pytest.raises(CuaError):
+        cua.execute("click", {"x": 1, "y": 1})
+
+
+# --------------------------------------------------------------------------
+# the unproven path keeps its receipt
+# --------------------------------------------------------------------------
+
+
+def test_a_failed_verification_carries_the_receipt(windows, fake_cua, binding):
+    """The path where the residue matters most must not be the one that loses it."""
+    fake_cua.script(
+        snapshot=[(FRAME, 0), ({**FRAME, "image_base64": "B"}, 0)],
+        act=[({"success": True, "delivered": True}, 0)],
+        verify=[({"success": True, "results": [{"status": "unknown", "name": "element"}]}, 0)],
+    )
+    with pytest.raises(CuaVerificationError) as error:
+        cua.execute(
+            "click",
+            {"x": 100, "y": 200},
+            binding=binding,
+            expectations=[{"element_exists": {"role": "button"}}],
+        )
+    receipt = error.value.execution
+    assert receipt is not None
+    # Everything an operator needs to know what to go and inspect.
+    assert receipt.binding.window_handle == binding.window_handle
+    assert receipt.delivery["params"]["x"] == 100
+    assert receipt.pixel_changed is True
+    assert receipt.verified is False
+
+
+def test_a_verification_error_without_an_attached_receipt_is_still_none():
+    """The attribute always exists, so a caller can branch without hasattr."""
+    assert CuaVerificationError("nope").execution is None

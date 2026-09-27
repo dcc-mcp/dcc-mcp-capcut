@@ -147,8 +147,12 @@ def build_action(
     if missing:
         raise CuaActionRejected(f"{action}: missing required parameter(s) {', '.join(missing)}")
 
-    needs_space = action in COORDINATE_ACTIONS and action != "scroll"
-    if needs_space and (observation_width is None or observation_height is None):
+    # The invariant is about addressing a pixel, not about the action's name.
+    # A window-wide scroll names no pixel and needs no frame, but the moment one
+    # carries x/y it is addressing a pixel exactly like a click is -- so it must
+    # be measured against the same frame, or it lands somewhere nobody looked.
+    addresses_pixel = action in COORDINATE_ACTIONS and bool({"x", "y"} & set(given))
+    if addresses_pixel and (observation_width is None or observation_height is None):
         raise CuaActionRejected(
             f"{action}: a coordinate action needs the observation_width/observation_height "
             "of the frame its coordinates were measured in"

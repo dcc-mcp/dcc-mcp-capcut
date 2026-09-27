@@ -396,12 +396,19 @@ def test_the_receipt_records_the_version_verdict(windows, fake_cua, binding):
 def test_bind_and_check_and_execute_agree_on_admissibility(
     windows, host_build, monkeypatch, fake_cua
 ):
-    """Two entry points, one verdict: they must not disagree about the build."""
+    """Two entry points, one verdict: neither may admit an unlisted build.
+
+    Both assertions match the guard's own message rather than any CuaError. This
+    test previously asserted only ``pytest.raises(CuaError)``, which still passed
+    with the guard removed from execute(): the scripted fake exhausts its queued
+    replies and raises a CuaError anyway, so the wrong exception satisfied the
+    right assertion. Matching the message is what makes each side load-bearing.
+    """
     host_build("10.9.9.9999")
     monkeypatch.setattr(cua, "bind", lambda **kwargs: cua.CuaBinding(pid=1, window_handle=2))
-    with pytest.raises(CuaError):
+    with pytest.raises(CuaError, match="refusing to run pixel execution"):
         cua.bind_and_check()
-    with pytest.raises(CuaError):
+    with pytest.raises(CuaError, match="refusing to run pixel execution"):
         cua.execute("click", {"x": 1, "y": 1})
 
 

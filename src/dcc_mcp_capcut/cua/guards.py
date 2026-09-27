@@ -74,11 +74,18 @@ def guard_host_version(
 ) -> VersionGuard:
     """Grade the installed build and decide whether pixel execution may proceed.
 
-    A listed build (``verified`` or merely ``known``) is *pinned*: it appears in
-    the matrix, so coordinates recorded against it mean something. An unlisted or
-    unreadable build is *unpinned* and is refused unless ``allow_unverified``
-    is set -- an explicit operator acknowledgement that they are running
-    coordinates nobody validated for this build.
+    A listed build (``verified`` or merely ``known``) is *pinned*: the matrix
+    records it, so it is a build coordinates could have been measured on at all.
+    That is a fact about the build, **not** about any coordinate. Being listed
+    does not make a coordinate correct, and it does not make the frame check
+    redundant: a coordinate is only meaningful once it was measured on this build
+    *and* checked against the captured frame, which are two different questions
+    answered by two different guards. "The adapter ran" and "the click landed on
+    the control the operator meant" remain different claims here.
+
+    An unlisted or unreadable build is *unpinned* and is refused unless
+    ``allow_unverified`` is set -- an explicit operator acknowledgement that
+    they are running coordinates nobody validated for this build.
     """
     provider = get_provider(platform)
     if not provider.supported:

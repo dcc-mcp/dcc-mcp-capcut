@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.5.0...v0.5.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ci:** anchor release identity on the tag, not github.sha ([d67dc10](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/d67dc104fdcde151ec4415eb17e637422df557f9))
+
 ## [0.5.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.4.0...v0.5.0) (2026-09-27)
 
 

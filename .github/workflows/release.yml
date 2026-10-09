@@ -43,23 +43,30 @@ jobs:
           # started this run. Asserting RELEASE_SHA == GITHUB_SHA made artifact jobs
           # fail in exactly that case, and the next push skipped them (created != true),
           # so the release shipped with no artifacts and could never self-heal.
-          tag_commit="$(git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG^{commit}" || true)"
+          # The identity step runs before checkout, so resolve the tag against the
+          # canonical URL in a scratch repo. Fetching the ref and peeling locally
+          # works for both lightweight and annotated tags; matching only the
+          # dereferenced `refs/tags/<tag>^{}` line would find lightweight tags
+          # (all release-please tags are lightweight) never, and reintroduce the
+          # zero-artifact failure this job exists to prevent.
+          git init --quiet release-identity
+          cd release-identity
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          tag_commit=""
+          for _ in $(seq 1 12); do
+            if git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" 2>/dev/null; then
+              tag_commit="$(git rev-list -n 1 "$RELEASE_TAG" || true)"
+              [ -n "$tag_commit" ] && break
+            fi
+            echo "waiting for $RELEASE_TAG to become visible on origin"
+            sleep 5
+          done
           if [ -z "$tag_commit" ]; then
-            for _ in $(seq 1 12); do
-              if tag_commit="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}^{}" 2>/dev/null | awk 'NR==1{print $1}')"; then
-                [ -n "$tag_commit" ] && break
-              fi
-              echo "waiting for $RELEASE_TAG to become visible on origin"
-              sleep 5
-            done
+            echo "::error::release tag $RELEASE_TAG is not resolvable on origin"
+            exit 1
           fi
-          if [ -n "$tag_commit" ]; then
-            echo "tag $RELEASE_TAG -> $tag_commit"
-            test "$tag_commit" = "$RELEASE_SHA"
-          else
-            echo "release tag $RELEASE_TAG is not resolvable yet; comparing with the caller"
-            test "$RELEASE_SHA" = "$GITHUB_SHA"
-          fi
+          echo "tag $RELEASE_TAG -> $tag_commit"
+          test "$tag_commit" = "$RELEASE_SHA"
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -137,20 +144,19 @@ jobs:
           if [ -z "$tag_commit" ]; then
             for _ in $(seq 1 12); do
               if git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" 2>/dev/null; then
-                tag_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+                tag_commit="$(git rev-list -n 1 "$RELEASE_TAG" || true)"
                 [ -n "$tag_commit" ] && break
               fi
               echo "waiting for $RELEASE_TAG to become visible on origin"
               sleep 5
             done
           fi
-          if [ -n "$tag_commit" ]; then
-            echo "tag $RELEASE_TAG -> $tag_commit"
-            test "$tag_commit" = "$RELEASE_SHA"
-          else
-            echo "release tag $RELEASE_TAG is not resolvable yet; comparing with the caller"
-            test "$RELEASE_SHA" = "$GITHUB_SHA"
+          if [ -z "$tag_commit" ]; then
+            echo "::error::release tag $RELEASE_TAG is not resolvable on origin"
+            exit 1
           fi
+          echo "tag $RELEASE_TAG -> $tag_commit"
+          test "$tag_commit" = "$RELEASE_SHA"
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "Release target must be a canonical vMAJOR.MINOR.PATCH tag." >&2

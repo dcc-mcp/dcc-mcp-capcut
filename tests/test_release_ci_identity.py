@@ -11,6 +11,21 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def bash_executable():
+    if os.name == "nt":
+        # PATH can resolve to the WSL launcher, which is not a usable Bash
+        # without an installed distro. Use the shell shipped with Git instead.
+        git = shutil.which("git")
+        if git is None:
+            return None
+        candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+        return str(candidate) if candidate.is_file() else None
+    return shutil.which("bash")
+
+
+BASH = bash_executable()
+
+
 def workflow(name):
     return yaml.load((ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
 
@@ -39,19 +54,21 @@ def test_pr_and_release_credentials_have_separate_roles():
     assert all("continue-on-error" not in step for step in job["steps"])
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is unavailable")
+@pytest.mark.skipif(BASH is None, reason="native Bash is unavailable")
 @pytest.mark.parametrize("token,expected", [("", 1), ("offline-fixture-only", 0)])
 def test_missing_token_fails_before_release_without_disclosing_value(token, expected):
     preflight = workflow("release-please.yml")["jobs"]["release-please"]["steps"][0]
     assert preflight["env"] == {"RELEASE_PR_TOKEN": "${{ secrets.PERSONAL_ACCESS_TOKEN }}"}
     result = subprocess.run(
-        ["bash", "-eu", "-c", preflight["run"]],
+        [BASH, "-eu", "-c", preflight["run"]],
         env={**os.environ, "RELEASE_PR_TOKEN": token},
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == expected
+    if expected != 0:
+        assert "::error::Organization PERSONAL_ACCESS_TOKEN is unavailable" in result.stdout
     assert "offline-fixture-only" not in result.stdout + result.stderr
 
 

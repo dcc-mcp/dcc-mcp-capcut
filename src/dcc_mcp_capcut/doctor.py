@@ -51,6 +51,7 @@ from .bootstrap import CapCutBindingError, select_capcut_window
 from .bridge import DEFAULT_BRIDGE_TOKEN
 from .hosts import get_provider
 from .installer import verify_installation
+from .subprocess_util import run_hidden
 
 OK = "ok"
 WARN = "warn"
@@ -283,7 +284,7 @@ def check_host_version() -> Check:
 
 
 def _dcc_cua_inventory(timeout: float = DCC_CUA_TIMEOUT) -> list[dict[str, Any]]:
-    completed = subprocess.run(  # noqa: S603 - project-owned read-only inventory command
+    completed = run_hidden(
         ["dcc-cua", "list"],
         check=True,
         capture_output=True,

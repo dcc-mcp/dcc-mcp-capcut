@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from .subprocess_util import run_hidden
 from .subtitles import Cue, SubtitleFormatError, parse_cues, render_srt
 
 ASR_EXECUTOR_ENV = "DCC_MCP_CAPCUT_ASR_EXECUTOR"
@@ -208,7 +209,7 @@ def run_executor(
     command = build_command(executor, media, language=language, output_format=output_format)
     seconds = resolve_timeout(timeout)
     try:
-        completed = subprocess.run(  # noqa: S603 - operator-named argv, never a shell
+        completed = run_hidden(
             command,
             capture_output=True,
             timeout=seconds,

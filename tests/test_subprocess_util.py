@@ -15,6 +15,7 @@ remembered this file exists. A per-call-site assertion could not do that.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,9 +54,11 @@ def captured_kwargs(monkeypatch):
     return seen
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="CREATE_NO_WINDOW is Windows-only; see the POSIX test below"
+)
 def test_run_hidden_injects_the_windows_flag(captured_kwargs):
     """On Windows the flag must be ``CREATE_NO_WINDOW``, not a generic truthy."""
-    assert hasattr(subprocess, "CREATE_NO_WINDOW"), "test requires a Windows host"
     subprocess_util.run_hidden(["dcc-cua", "list"], timeout=5)
     assert captured_kwargs[0]["creationflags"] == subprocess.CREATE_NO_WINDOW
 

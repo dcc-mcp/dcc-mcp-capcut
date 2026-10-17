@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.5.0...v0.5.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** anchor release identity on the tag, not github.sha ([d67dc10](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/d67dc104fdcde151ec4415eb17e637422df557f9))
+* **ci:** use organization credential for release PR automation ([#45](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/45)) ([efcc968](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/efcc968c678e83490763710ac6291a45530cfd46))
+* **windows:** suppress console windows for child processes ([#47](https://github.com/dcc-mcp/dcc-mcp-capcut/issues/47)) ([2452eaa](https://github.com/dcc-mcp/dcc-mcp-capcut/commit/2452eaa3a150de6dbf3191ac16fb0eb48e28e918))
+
 ## [0.5.0](https://github.com/dcc-mcp/dcc-mcp-capcut/compare/v0.4.0...v0.5.0) (2026-09-27)
 
 

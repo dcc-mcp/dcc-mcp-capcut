@@ -14,13 +14,16 @@ concurrency:
 jobs:
   release-please:
     uses: ./.github/workflows/release-please.yml
+    secrets:
+      PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
     permissions:
       contents: write
       pull-requests: write
 
   artifacts:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # A later PR refresh failure must not strand a release already created above.
+    if: ${{ !cancelled() && needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -112,7 +115,9 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     needs: [release-please, artifacts]
-    if: needs.release-please.outputs.release_created == 'true'
+    # Publish only the successfully validated artifacts of that created release.
+    if: ${{ !cancelled() && needs.artifacts.result == 'success'
+      && needs.release-please.outputs.release_created == 'true' }}
     environment:
       name: pypi
       url: https://pypi.org/p/dcc-mcp-capcut

@@ -2,6 +2,10 @@ name: Release Please
 
 on:
   workflow_call:
+    secrets:
+      PERSONAL_ACCESS_TOKEN:
+        description: Existing organization credential for release PR automation
+        required: true
     outputs:
       release_created:
         value: ${{ jobs.release-please.outputs.release_created }}
@@ -24,12 +28,25 @@ jobs:
       tag: ${{ steps.release.outputs.tag_name }}
       sha: ${{ steps.release.outputs.sha }}
     steps:
+      - name: Require organization release PR credential
+        shell: bash
+        env:
+          RELEASE_PR_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_PR_TOKEN" ]; then
+            echo "::error::Organization PERSONAL_ACCESS_TOKEN is unavailable to this workflow."
+            exit 1
+          fi
+      # Preserve the bot-owned release and existing publisher handoff.
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
         id: release
         with:
-          # A PR opened with the default GITHUB_TOKEN triggers no workflows: the
-          # runs sit at `action_required` with zero jobs, so a "release PR must
-          # be green" gate was structurally unreachable. A PAT makes the PR an
-          # ordinary user PR and its checks run on their own. Until that secret
-          # exists this falls back to GITHUB_TOKEN and behaves as before.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          skip-github-pull-request: true
+      # GITHUB_TOKEN-created PRs require manual approval before CI can run.
+      # Use the existing organization credential only for PR creation/updates.
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
+        id: release-pr
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          skip-github-release: true

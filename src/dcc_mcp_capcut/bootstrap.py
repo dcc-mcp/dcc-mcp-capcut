@@ -14,6 +14,7 @@ from typing import Any, Sequence
 
 from .hosts import get_provider
 from .server import start_server, stop_server
+from .subprocess_util import run_hidden
 
 
 class CapCutBindingError(RuntimeError):
@@ -80,7 +81,7 @@ def discover_capcut_window(
 ) -> CapCutWindowBinding:
     """Read the official dcc-cua inventory without performing UI input."""
     try:
-        completed = subprocess.run(
+        completed = run_hidden(
             ["dcc-cua", "list"],
             check=True,
             capture_output=True,

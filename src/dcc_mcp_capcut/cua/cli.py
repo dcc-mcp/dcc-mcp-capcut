@@ -25,6 +25,7 @@ import subprocess
 from collections.abc import Sequence
 from typing import Any
 
+from ..subprocess_util import run_hidden
 from .errors import CuaError, CuaUnavailable, classify
 
 #: The CLI name resolved on PATH. Kept a module constant so tests can point the
@@ -189,7 +190,7 @@ def run_json(args: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT) -> dict[s
     remediation -- and maps every other transport failure onto the taxonomy.
     """
     try:
-        completed = subprocess.run(  # noqa: S603 - project-owned CLI, fixed argv, no shell
+        completed = run_hidden(
             list(args),
             capture_output=True,
             text=True,
